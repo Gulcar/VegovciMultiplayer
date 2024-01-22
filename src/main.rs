@@ -1,21 +1,48 @@
 use macroquad::prelude::*;
+use std::cell::Cell;
 
 mod player;
 use player::*;
+
 mod collision;
 use collision::*;
 
-fn posodobi_kamero() {
-    let width = screen_width();
-    let height = screen_height();
+/// v bistvu polovicen width
+fn screen_units_width() -> f32 {
+    screen_units_height() * screen_width() / screen_height()
+}
 
-    let pixels = 128.0;
+/// v bistvu polovicen height
+fn screen_units_height() -> f32 {
+    128.0
+}
+
+thread_local! {
+    static KAMERA_POS: Cell<Vec2> = Cell::new(Vec2::ZERO);
+}
+
+fn posodobi_kamero() {
+    let pixels_x = screen_units_width();
+    let pixels_y = screen_units_height();
 
     set_camera(&Camera2D {
-        target: vec2(0.0, 0.0),
-        zoom: vec2((1.0 / pixels) / width * height, 1.0 / pixels),
+        target: KAMERA_POS.get(),
+        zoom: vec2(1.0 / pixels_x, 1.0 / pixels_y),
         ..Default::default()
     });
+}
+
+fn pozicija_miske_v_svetu() -> Vec2 {
+    let pos = mouse_position();
+    let norm_pos = vec2(pos.0 / screen_width(), pos.1 / screen_height());
+    let norm_from_center = norm_pos - vec2(0.5, 0.5);
+
+    let pozicija = Vec2::new(
+        norm_from_center.x * screen_units_width() * 2.0,
+        norm_from_center.y * screen_units_height() * 2.0
+    );
+
+    pozicija + KAMERA_POS.get()
 }
 
 async fn load_texture_nearest(file: &str) -> Result<Texture2D, macroquad::Error> {
@@ -31,6 +58,46 @@ fn texture_params_source(x: f32, y: f32, w: f32, h: f32) -> DrawTextureParams {
     }
 }
 
+fn lerp(a: f32, b: f32, t: f32) -> f32 {
+    a * (1.0 - t) + b * t
+}
+
+fn generate_map_colliders(map_image: Image, offset: Vec2) -> Vec<StaticenAABBRef> {
+    let mut colliders = Vec::new();
+
+    let mut obiskano = Vec::new();
+    obiskano.resize(map_image.width() / 16 * map_image.height() / 16, false);
+
+    for y in (0..map_image.height()).step_by(16).rev() {
+        for x in (0..map_image.width()).step_by(16) {
+            if map_image.get_pixel(x as u32, y as u32).a > 0.0 {
+
+                if obiskano[x / 16 + (y / 16) * map_image.width() / 16] {
+                    continue;
+                }
+
+                let mut extend_x = 0;
+                let mut ex = x + 16;
+                while ex < map_image.width() && map_image.get_pixel(ex as u32, y as u32).a > 0.0 {
+                    extend_x += 1;
+                    obiskano[ex / 16 + (y / 16) * map_image.width() / 16] = true;
+                    ex += 16;
+                }
+
+                let aabb = AABB::new(
+                    x as f32 + offset.x,
+                    y as f32 + offset.y,
+                    16.0 + (extend_x as f32) * 16.0,
+                    16.0
+                );
+                colliders.push(physics::dodaj_staticen_obj(aabb));
+            }
+        }
+    }
+
+    colliders
+}
+
 #[macroquad::main("VegovciMultiplayer")]
 async fn main() {
     println!("pozdravljen svet!");
@@ -40,13 +107,13 @@ async fn main() {
 
     physics::init();
 
-    let mut map_aabb_refs = Vec::new();
-    map_aabb_refs.push(physics::dodaj_staticen_obj(AABB::new(-96.0, 96.0, 192.0, 32.0)));
-    map_aabb_refs.push(physics::dodaj_staticen_obj(AABB::new(32.0, 64.0, 16.0, 32.0)));
+    let map_aabb_refs = generate_map_colliders(map_texture.get_texture_data(), vec2(-256.0, -128.0));
+    //map_aabb_refs.push(physics::dodaj_staticen_obj(AABB::new(-96.0, 48.0, 192.0, 32.0)));
+    //map_aabb_refs.push(physics::dodaj_staticen_obj(AABB::new(32.0, 16.0, 16.0, 32.0)));
 
-    let test_aabb = physics::dodaj_dinamicen_obj(AABB::new(-32.0, 64.0, 16.0, 32.0));
+    let test_aabb = physics::dodaj_dinamicen_obj(AABB::new(-32.0, 16.0, 16.0, 32.0));
 
-    let mut player = Player::new(vec2(0.0, 64.0), vegovec_texture);
+    let mut player = Player::new(vec2(0.0, 0.0), vegovec_texture);
 
     loop {
         let delta = get_frame_time().min(1.0 / 15.0);
@@ -58,10 +125,16 @@ async fn main() {
         posodobi_kamero();
         clear_background(Color::new(0.1, 0.1, 0.1, 1.0));
 
-        draw_texture(&map_texture, -128.0, 0.0, WHITE);
+        draw_texture(&map_texture, -256.0, -128.0, WHITE);
         player.narisi();
 
         physics::narisi_aabbje();
+
+        draw_text_ex(&format!("{} fps", get_fps()), -screen_units_width() + 3.0, -screen_units_height() + 11.0, TextParams {
+            font_size: 60,
+            font_scale: 0.25,
+            ..Default::default()
+        });
         
         next_frame().await;
     }
