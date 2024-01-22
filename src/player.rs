@@ -9,22 +9,73 @@ const JUMP_VEL: f32 = 500.0;
 const MAX_VEL: f32 = 600.0;
 const GRAVITY: f32 = 1500.0;
 
+struct Animacija {
+    cas: f32,
+    cas_na_frame: f32,
+    stevilo_framov: u32,
+    prvi_frame: Rect,
+    loop_anim: bool,
+}
+
+impl Animacija {
+    fn new(prvi_frame: Rect, stevilo_framov: u32, cas_na_frame: f32, loop_anim: bool) -> Animacija {
+        Animacija {
+            cas: 0.0,
+            cas_na_frame,
+            stevilo_framov,
+            prvi_frame,
+            loop_anim
+        }
+    }
+
+    fn posodobi(&mut self, delta: f32) {
+        self.cas += delta;
+        if self.loop_anim && self.cas >= self.cas_na_frame * self.stevilo_framov as f32 {
+            self.cas -= self.cas_na_frame * self.stevilo_framov as f32;
+        }
+    }
+
+    fn naredi_source_params(&self) -> DrawTextureParams {
+        texture_params_source(
+            self.prvi_frame.x + (self.cas / self.cas_na_frame).floor() * self.prvi_frame.w,
+            self.prvi_frame.y,
+            self.prvi_frame.w, self.prvi_frame.h
+        )
+    }
+}
+
 pub struct Player {
     pub position: Vec2,
+    pub ime: String,
+
     velocity_y: f32,
     jumps_allowed: i32,
+    attack_time: f32,
+
     texture: Texture2D,
     aabb_ref: DinamicenAABBRef,
+
+    animacije: Vec<Animacija>,
+    trenutna_anim: usize,
+    flip_x: bool,
 }
 
 impl Player {
-    pub fn new(position: Vec2, texture: Texture2D) -> Player {
+    pub fn new(ime: String, position: Vec2, texture: Texture2D) -> Player {
         Player {
             position,
+            ime,
             velocity_y: 0.0,
             jumps_allowed: 0,
+            attack_time: 99.0,
             texture,
             aabb_ref: physics::dodaj_dinamicen_obj(AABB::from_vec(position, vec2(16.0, 28.0))),
+            animacije: vec![
+                Animacija::new(Rect::new(0.0, 32.0, 32.0, 32.0), 2, 0.350, true),
+                Animacija::new(Rect::new(0.0, 64.0, 32.0, 32.0), 4, 0.100, true),
+            ],
+            trenutna_anim: 0,
+            flip_x: false,
         }
     }
 
@@ -66,21 +117,43 @@ impl Player {
             lerp(pozicija_kamere.y, zeljena_pozicija_kamere.y, 3.0 * delta)
         );
         KAMERA_POS.set(nova_pozicija);
+
+        if is_mouse_button_pressed(MouseButton::Left) {
+            self.attack_time = 0.0;
+        } else {
+            self.attack_time += delta;
+        }
+
+        self.animacije[self.trenutna_anim].posodobi(delta);
+        if premik.x != 0.0 {
+            self.trenutna_anim = 1;
+            self.flip_x = premik.x < 0.0;
+        } else {
+            self.trenutna_anim = 0;
+        }
     }
 
     pub fn narisi(&self) {
         let position = physics::pozicija_obj(&self.aabb_ref);
         let draw_position = position - vec2(8.0, 4.0);
-        let params = texture_params_source(0.0, 0.0, 32.0, 32.0);
+        let mut params = self.animacije[self.trenutna_anim].naredi_source_params();
+        params.flip_x = self.flip_x;
         draw_texture_ex(&self.texture, draw_position.x, draw_position.y, WHITE, params);
+
+        let attack_amount = -f32::powi(self.attack_time / 0.3 - 1.0, 3);
+        let sword_dist = 18.0 + 22.0 * attack_amount.max(0.0);
 
         let center = draw_position + vec2(16.0, 16.0);
         let mouse_position = pozicija_miske_v_svetu();
-        let sword_offset = (mouse_position - center).normalize() * 24.0;
+        let sword_offset = (mouse_position - center).normalize() * sword_dist;
         let sword_draw_position = center + sword_offset - vec2(8.0, 8.0);
         let mut params = texture_params_source(64.0, 16.0, 16.0, 16.0);
         params.rotation = f32::atan2(sword_offset.y, sword_offset.x) + PI / 4.0;
         draw_texture_ex(&self.texture, sword_draw_position.x, sword_draw_position.y, WHITE, params);
+
+        let text_params = TextParams { font_size: 32, font_scale: 0.25, ..Default::default() };
+        let dimensions = measure_text(&self.ime, None, text_params.font_size, text_params.font_scale);
+        draw_text_ex(&self.ime, draw_position.x + 16.0 - dimensions.width / 2.0, position.y - 5.0, text_params);
     }
 }
 

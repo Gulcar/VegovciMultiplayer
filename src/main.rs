@@ -113,7 +113,7 @@ async fn main() {
 
     let test_aabb = physics::dodaj_dinamicen_obj(AABB::new(-32.0, 16.0, 16.0, 32.0));
 
-    let mut player = Player::new(vec2(0.0, 0.0), vegovec_texture);
+    let mut player = Player::new("epic gamer".to_string(), vec2(0.0, 0.0), vegovec_texture);
 
     loop {
         let delta = get_frame_time().min(1.0 / 15.0);
