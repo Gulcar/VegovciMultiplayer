@@ -193,6 +193,24 @@ pub mod physics {
             }
         }
     }
+
+    pub fn st_dinamicnih_obj() -> usize {
+        let mut physics_mutex_guard = GLOBAL_PHYSICS.lock().unwrap();
+        let physics = physics_mutex_guard.as_mut().unwrap();
+
+        physics.dinamicni.elements.iter()
+            .filter(|x| x.is_some())
+            .count()
+    }
+
+    pub fn st_staticnih_obj() -> usize {
+        let mut physics_mutex_guard = GLOBAL_PHYSICS.lock().unwrap();
+        let physics = physics_mutex_guard.as_mut().unwrap();
+
+        physics.staticni.elements.iter()
+            .filter(|x| x.is_some())
+            .count()
+    }
 }
 
 impl Drop for StaticenAABBRef {

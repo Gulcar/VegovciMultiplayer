@@ -1,11 +1,14 @@
 use macroquad::prelude::*;
 use std::cell::Cell;
+use std::env;
 
 mod player;
-use player::*;
-
 mod collision;
+mod network;
+
+use player::*;
 use collision::*;
+use network::*;
 
 /// v bistvu polovicen width
 fn screen_units_width() -> f32 {
@@ -19,6 +22,23 @@ fn screen_units_height() -> f32 {
 
 thread_local! {
     static KAMERA_POS: Cell<Vec2> = Cell::new(Vec2::ZERO);
+    static IS_SERVER: bool = calc_is_server();
+}
+
+#[allow(dead_code)] // rust ne ve da je uporabljeno v thread_local?
+fn calc_is_server() -> bool {
+    if let Some(s) = env::args().last() {
+        return s == "host";
+    }
+    false
+}
+
+fn is_server() -> bool {
+    let mut ret = false;
+    IS_SERVER.with(|server| {
+        ret = *server;
+    });
+    ret
 }
 
 fn posodobi_kamero() {
@@ -102,21 +122,52 @@ fn generate_map_colliders(map_image: Image, offset: Vec2) -> Vec<StaticenAABBRef
 async fn main() {
     println!("pozdravljen svet!");
 
+    if is_server() {
+        println!("v nacinu streznika!");
+    }
+
+    let mut net_interface = {
+        if is_server() { NetInterface::Server(Server::new()) }
+        else { NetInterface::Client(Client::new("127.0.0.1")) }
+    };
+
     let vegovec_texture = load_texture_nearest("assets/vegovec.png").await.unwrap();
     let map_texture = load_texture_nearest("assets/map.png").await.unwrap();
 
     physics::init();
 
-    let map_aabb_refs = generate_map_colliders(map_texture.get_texture_data(), vec2(-256.0, -128.0));
+    let _map_aabb_refs = generate_map_colliders(map_texture.get_texture_data(), vec2(-256.0, -128.0));
     //map_aabb_refs.push(physics::dodaj_staticen_obj(AABB::new(-96.0, 48.0, 192.0, 32.0)));
     //map_aabb_refs.push(physics::dodaj_staticen_obj(AABB::new(32.0, 16.0, 16.0, 32.0)));
 
-    let test_aabb = physics::dodaj_dinamicen_obj(AABB::new(-32.0, 16.0, 16.0, 32.0));
+    let _test_aabb = physics::dodaj_dinamicen_obj(AABB::new(-32.0, 16.0, 16.0, 32.0));
 
     let mut player = Player::new("epic gamer".to_string(), vec2(0.0, 0.0), vegovec_texture);
 
+    println!("stevilo staticnih objektov: {}", physics::st_staticnih_obj());
+    println!("stevilo dinamicnih objektov: {}", physics::st_dinamicnih_obj());
+
     loop {
         let delta = get_frame_time().min(1.0 / 15.0);
+
+        match net_interface {
+            NetInterface::Server(ref mut server) => {
+                server.listen();
+                server.recv();
+                server.poslji_vse_state(&player);
+            },
+            NetInterface::Client(ref mut client) => {
+                client.recv();
+                let state = State {
+                    position: (player.position.x, player.position.y),
+                    rotation: player.get_rotation(),
+                    id: client.id,
+                };
+                let send_buf = bincode::serialize(&Message::PlayerState(state)).unwrap();
+                client.send(&send_buf);
+            },
+        }
+
         player.posodobi(delta);
 
         physics::resi_trke();
@@ -130,9 +181,19 @@ async fn main() {
 
         physics::narisi_aabbje();
 
-        draw_text_ex(&format!("{} fps", get_fps()), -screen_units_width() + 3.0, -screen_units_height() + 11.0, TextParams {
-            font_size: 60,
-            font_scale: 0.25,
+        match net_interface {
+            NetInterface::Server(ref server) => {
+                server.narisi_cliente();
+            }
+            NetInterface::Client(ref client) => {
+                client.narisi_cliente();
+            }
+        }
+
+        let pos = vec2(-screen_units_width() + 3.0, -screen_units_height() + 11.0) + KAMERA_POS.get();
+        draw_text_ex(&format!("{} fps", get_fps()), pos.x, pos.y, TextParams {
+            font_size: 32,
+            font_scale: 0.35,
             ..Default::default()
         });
         

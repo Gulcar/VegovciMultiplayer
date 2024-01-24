@@ -57,7 +57,6 @@ pub struct Player {
 
     animacije: Vec<Animacija>,
     trenutna_anim: usize,
-    flip_x: bool,
 }
 
 impl Player {
@@ -75,15 +74,16 @@ impl Player {
                 Animacija::new(Rect::new(0.0, 64.0, 32.0, 32.0), 4, 0.100, true),
             ],
             trenutna_anim: 0,
-            flip_x: false,
         }
     }
 
     pub fn posodobi(&mut self, delta: f32) {
         let nova_pozicija = physics::pozicija_obj(&self.aabb_ref);
-        if nova_pozicija.y == self.position.y {
+        let mut is_grounded = false;
+        if (nova_pozicija.y - self.position.y).abs() < 0.00001 {
             self.velocity_y = 0.0;
-            self.jumps_allowed = 2;
+            self.jumps_allowed = 1;
+            is_grounded = true;
         }
         self.position = nova_pozicija;
 
@@ -96,9 +96,11 @@ impl Player {
             premik.x += PLAYER_SPEED * delta;
         }
 
-        if self.jumps_allowed > 0 && is_key_pressed(KeyCode::W) {
+        if (self.jumps_allowed > 0 || is_grounded) && is_key_pressed(KeyCode::W) {
             self.velocity_y = -JUMP_VEL;
-            self.jumps_allowed -= 1;
+            if is_grounded == false {
+                self.jumps_allowed -= 1;
+            }
         }
         self.velocity_y += GRAVITY * delta;
         if self.velocity_y.abs() > MAX_VEL {
@@ -127,7 +129,6 @@ impl Player {
         self.animacije[self.trenutna_anim].posodobi(delta);
         if premik.x != 0.0 {
             self.trenutna_anim = 1;
-            self.flip_x = premik.x < 0.0;
         } else {
             self.trenutna_anim = 0;
         }
@@ -137,7 +138,7 @@ impl Player {
         let position = physics::pozicija_obj(&self.aabb_ref);
         let draw_position = position - vec2(8.0, 4.0);
         let mut params = self.animacije[self.trenutna_anim].naredi_source_params();
-        params.flip_x = self.flip_x;
+        params.flip_x = pozicija_miske_v_svetu().x < draw_position.x + 16.0;
         draw_texture_ex(&self.texture, draw_position.x, draw_position.y, WHITE, params);
 
         let attack_amount = -f32::powi(self.attack_time / 0.3 - 1.0, 3);
@@ -154,6 +155,11 @@ impl Player {
         let text_params = TextParams { font_size: 32, font_scale: 0.25, ..Default::default() };
         let dimensions = measure_text(&self.ime, None, text_params.font_size, text_params.font_scale);
         draw_text_ex(&self.ime, draw_position.x + 16.0 - dimensions.width / 2.0, position.y - 5.0, text_params);
+    }
+
+    pub fn get_rotation(&self) -> f32 {
+        let to = pozicija_miske_v_svetu() - (self.position + vec2(8.0, 12.0));
+        f32::atan2(to.y, to.x)
     }
 }
 
