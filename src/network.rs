@@ -108,6 +108,9 @@ impl Server {
     fn handle_msg(&mut self, msg: Message, conn_i: usize) {
         match msg {
             Message::PlayerState(state) => {
+                if state.attack_time == 0.0 {
+                    // TODO:
+                }
                 let id = self.clients[conn_i].state.id;
                 self.clients[conn_i].state = state;
                 self.clients[conn_i].state.id = id;
@@ -159,7 +162,7 @@ impl Server {
         for conn in &self.clients {
             //draw_rectangle_lines(conn.state.position.0, conn.state.position.1, 16.0, 28.0, 1.0, macroquad::color::RED);
             let state = &conn.state;
-            Player::narisi_iz(tekstura, state.position.into(), state.anim_frame.into(), state.rotation, state.attack_time, &conn.user_name);
+            Player::narisi_iz(tekstura, state.position.into(), state.anim_frame.into(), state.rotation, state.radzalja_meca, state.attack_time, &conn.user_name);
         }
     }
 
@@ -170,9 +173,10 @@ impl Server {
         states.push(State {
             id: 0, // gazda/host id
             position: (player.position.x, player.position.y),
-            rotation: player.get_rotation(),
+            rotation: player.rotation,
             anim_frame: player.get_anim().izr_frame_xy().into(),
             attack_time: player.attack_time,
+            radzalja_meca: player.razdalja_meca,
         });
         let send_buf = bincode::serialize(&Message::AllPlayersState(states)).unwrap();
         self.send_to_all(&send_buf);
@@ -247,7 +251,7 @@ impl Client {
             }
             //draw_rectangle_lines(state.position.0, state.position.1, 16.0, 28.0, 1.0, macroquad::color::RED);
             let name = self.net_user_names.get(&state.id).unwrap_or(&default_name);
-            Player::narisi_iz(tekstura, state.position.into(), state.anim_frame.into(), state.rotation, state.attack_time, name);
+            Player::narisi_iz(tekstura, state.position.into(), state.anim_frame.into(), state.rotation, state.radzalja_meca, state.attack_time, name);
         }
     }
 }
@@ -264,6 +268,7 @@ pub struct State {
     pub rotation: f32,
     pub anim_frame: (f32, f32),
     pub attack_time: f32,
+    pub radzalja_meca: f32,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

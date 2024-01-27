@@ -50,12 +50,23 @@ impl<T> FreeList<T> {
     }
 }
 
+#[derive(Clone)]
+struct Objekt {
+    aabb: AABB,
+    layer: u32,
+    mask: u32,
+}
+
+pub const LAYER_MAP: u32 = 1 << 0;
+pub const LAYER_PLAYER: u32 = 1 << 1;
+pub const LAYER_SWORD: u32 = 1 << 2;
+
 pub struct DinamicenAABBRef(usize);
 pub struct StaticenAABBRef(usize);
 
 pub struct Physics {
-    dinamicni: FreeList<AABB>,
-    staticni: FreeList<AABB>,
+    dinamicni: FreeList<Objekt>,
+    staticni: FreeList<Objekt>,
 }
 
 static GLOBAL_PHYSICS: Mutex<Option<Physics>> = Mutex::new(None);
@@ -71,19 +82,23 @@ pub mod physics {
         });
     }
 
-    pub fn dodaj_dinamicen_obj(aabb: AABB) -> DinamicenAABBRef {
+    pub fn dodaj_dinamicen_obj(aabb: AABB, layer: u32, mask: u32) -> DinamicenAABBRef {
         let mut physics_mutex_guard = GLOBAL_PHYSICS.lock().unwrap();
         let physics = physics_mutex_guard.as_mut().unwrap();
 
-        let i = physics.dinamicni.vstavi(aabb);
+        let i = physics.dinamicni.vstavi(Objekt {
+            aabb, layer, mask
+        });
         DinamicenAABBRef(i)
     }
 
-    pub fn dodaj_staticen_obj(aabb: AABB) -> StaticenAABBRef {
+    pub fn dodaj_staticen_obj(aabb: AABB, layer: u32, mask: u32) -> StaticenAABBRef {
         let mut physics_mutex_guard = GLOBAL_PHYSICS.lock().unwrap();
         let physics = physics_mutex_guard.as_mut().unwrap();
 
-        let i = physics.staticni.vstavi(aabb);
+        let i = physics.staticni.vstavi(Objekt {
+            aabb, layer, mask
+        });
         StaticenAABBRef(i)
     }
 
@@ -105,21 +120,28 @@ pub mod physics {
         let mut physics_mutex_guard = GLOBAL_PHYSICS.lock().unwrap();
         let physics = physics_mutex_guard.as_mut().unwrap();
 
-        let aabb = physics.dinamicni.elements[aabb_ref.0].as_mut().unwrap();
-        aabb.x += premik.x;
-        aabb.y += premik.y;
+        let obj = physics.dinamicni.elements[aabb_ref.0].as_mut().unwrap();
+        obj.aabb.x += premik.x;
+        obj.aabb.y += premik.y;
     }
 
     pub fn pozicija_obj(aabb_ref: &DinamicenAABBRef) -> Vec2 {
         let mut physics_mutex_guard = GLOBAL_PHYSICS.lock().unwrap();
         let physics = physics_mutex_guard.as_mut().unwrap();
 
-        let aabb = physics.dinamicni.elements[aabb_ref.0].unwrap();
+        let aabb = physics.dinamicni.elements[aabb_ref.0].as_ref().unwrap().aabb;
         Vec2::new(aabb.x, aabb.y)
     }
 
     // premik_a + premik_b = 1
-    fn resi_trk(a: &mut AABB, b: &mut AABB, premik_a: f32, premik_b: f32) {
+    fn resi_trk(obj_a: &mut Objekt, obj_b: &mut Objekt, premik_a: f32, premik_b: f32) {
+        if (obj_a.layer & obj_b.mask) == 0 || (obj_b.layer & obj_b.mask) == 0 {
+            return;
+        }
+
+        let a = &mut obj_a.aabb;
+        let b = &mut obj_b.aabb;
+
         let coll_x = (b.x >= a.x && b.x <= a.x + a.w) || (a.x >= b.x && a.x <= b.x + b.w);
         let coll_y = (b.y >= a.y && b.y <= a.y + a.h) || (a.y >= b.y && a.y <= b.y + b.h);
         if coll_x && coll_y {
@@ -154,25 +176,25 @@ pub mod physics {
         let physics = physics_mutex_guard.as_mut().unwrap();
 
         for i in 0..physics.dinamicni.elements.len() {
-            if let Some(mut aabb_i) = physics.dinamicni.elements[i] {
+            if let Some(mut obj_i) = physics.dinamicni.elements[i].clone() {
                 for j in (i+1)..physics.dinamicni.elements.len() {
-                    if let Some(mut aabb_j) = physics.dinamicni.elements[j] {
-                        resi_trk(&mut aabb_i, &mut aabb_j, 0.5, 0.5);
-                        physics.dinamicni.elements[j] = Some(aabb_j);
+                    if let Some(mut obj_j) = physics.dinamicni.elements[j].clone() {
+                        resi_trk(&mut obj_i, &mut obj_j, 0.5, 0.5);
+                        physics.dinamicni.elements[j] = Some(obj_j);
                     }
                 }
-                physics.dinamicni.elements[i] = Some(aabb_i);
+                physics.dinamicni.elements[i] = Some(obj_i);
             }
         }
 
-        for i in 0..physics.dinamicni.elements.len() {
-            if let Some(mut aabb_i) = physics.dinamicni.elements[i] {
-                for j in 0..physics.staticni.elements.len() {
-                    if let Some(mut aabb_j) = physics.staticni.elements[j] {
-                        resi_trk(&mut aabb_i, &mut aabb_j, 1.0, 0.0);
+        for i in 0..physics.staticni.elements.len() {
+            if let Some(mut obj_i) = physics.staticni.elements[i].clone() {
+                for j in 0..physics.dinamicni.elements.len() {
+                    if let Some(mut obj_j) = physics.dinamicni.elements[j].clone() {
+                        resi_trk(&mut obj_i, &mut obj_j, 0.0, 1.0);
+                        physics.dinamicni.elements[j] = Some(obj_j);
                     }
                 }
-                physics.dinamicni.elements[i] = Some(aabb_i);
             }
         }
     }
@@ -182,14 +204,14 @@ pub mod physics {
         let physics = physics_mutex_guard.as_mut().unwrap();
 
         for obj in physics.dinamicni.elements.iter() {
-            if let Some(aabb) = obj {
-                draw_rectangle_lines(aabb.x, aabb.y, aabb.w, aabb.h, 1.0, BLUE);
+            if let Some(o) = obj {
+                draw_rectangle_lines(o.aabb.x, o.aabb.y, o.aabb.w, o.aabb.h, 1.0, BLUE);
             }
         }
 
         for obj in physics.staticni.elements.iter() {
-            if let Some(aabb) = obj {
-                draw_rectangle_lines(aabb.x, aabb.y, aabb.w, aabb.h, 1.0, RED);
+            if let Some(o) = obj {
+                draw_rectangle_lines(o.aabb.x, o.aabb.y, o.aabb.w, o.aabb.h, 1.0, RED);
             }
         }
     }

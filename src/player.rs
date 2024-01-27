@@ -3,6 +3,7 @@ use std::f32::consts::PI;
 use macroquad::prelude::*;
 
 use crate::{texture_params_source, DinamicenAABBRef, physics, AABB, pozicija_miske_v_svetu, KAMERA_POS, lerp};
+use crate::{LAYER_MAP, LAYER_PLAYER, LAYER_SWORD};
 
 const PLAYER_SPEED: f32 = 75.0;
 const JUMP_VEL: f32 = 500.0;
@@ -53,6 +54,7 @@ impl Animacija {
 
 pub struct Player {
     pub position: Vec2,
+    pub rotation: f32,
     pub ime: String,
 
     velocity_y: f32,
@@ -62,6 +64,9 @@ pub struct Player {
     pub texture: Texture2D,
     aabb_ref: DinamicenAABBRef,
 
+    sword_ref: DinamicenAABBRef,
+    pub razdalja_meca: f32,
+
     pub animacije: Vec<Animacija>,
     pub trenutna_anim: usize,
 }
@@ -70,12 +75,15 @@ impl Player {
     pub fn new(ime: String, position: Vec2, texture: Texture2D) -> Player {
         Player {
             position,
+            rotation: 0.0,
             ime,
             velocity_y: 0.0,
             jumps_allowed: 0,
             attack_time: 99.0,
             texture,
-            aabb_ref: physics::dodaj_dinamicen_obj(AABB::from_vec(position, vec2(16.0, 28.0))),
+            aabb_ref: physics::dodaj_dinamicen_obj(AABB::from_vec(position, vec2(16.0, 28.0)), LAYER_PLAYER, LAYER_PLAYER | LAYER_MAP),
+            sword_ref: physics::dodaj_dinamicen_obj(AABB::from_vec(position, vec2(10.0, 10.0)), LAYER_SWORD, LAYER_SWORD | LAYER_MAP),
+            razdalja_meca: 0.0,
             animacije: vec![
                 Animacija::new(Rect::new(0.0, 32.0, 32.0, 32.0), 2, 0.350, true), // idle 0
                 Animacija::new(Rect::new(0.0, 64.0, 32.0, 32.0), 4, 0.100, true), // walk 1
@@ -118,6 +126,16 @@ impl Player {
 
         physics::premakni_obj(&self.aabb_ref, premik);
 
+        let smer_meca = pozicija_miske_v_svetu() - (self.position + vec2(8.0, 12.0));
+        let zeljena_pozicija = smer_meca.clamp_length_max(26.0) + self.position + vec2(3.0, 7.0);
+        let pozicija_meca = physics::pozicija_obj(&self.sword_ref);
+        let premik_meca = zeljena_pozicija - pozicija_meca;
+        physics::premakni_obj(&self.sword_ref, premik_meca * 10.0 * delta);
+
+        let dejanska_smer_meca = (pozicija_meca + vec2(5.0, 5.0)) - (self.position + vec2(8.0, 12.0));
+        self.rotation = f32::atan2(dejanska_smer_meca.y, dejanska_smer_meca.x);
+        self.razdalja_meca = dejanska_smer_meca.length() - 3.0;
+
         let zeljena_pozicija_kamere = Vec2::lerp(self.position, pozicija_miske_v_svetu(), 0.1);
         let pozicija_kamere = KAMERA_POS.get();
         // zelim pocasnejse premikanje kamere na y
@@ -143,17 +161,17 @@ impl Player {
 
     pub fn narisi(&self) {
         let position = physics::pozicija_obj(&self.aabb_ref);
-        Player::narisi_iz(&self.texture, position, self.get_anim().izr_frame_xy(), self.get_rotation(), self.attack_time, &self.ime);
+        Player::narisi_iz(&self.texture, position, self.get_anim().izr_frame_xy(), self.rotation, self.razdalja_meca, self.attack_time, &self.ime);
     }
 
-    pub fn narisi_iz(tekstura: &Texture2D, position: Vec2, anim_frame_xy: Vec2, rotacija: f32, attack_time: f32, ime: &str) {
+    pub fn narisi_iz(tekstura: &Texture2D, position: Vec2, anim_frame_xy: Vec2, rotacija: f32, razdalja_meca: f32, attack_time: f32, ime: &str) {
         let draw_position = position - vec2(8.0, 4.0);
         let mut params = texture_params_source(anim_frame_xy.x, anim_frame_xy.y, 32.0, 32.0);
         params.flip_x = rotacija > PI / 2.0 || rotacija < -PI / 2.0;
         draw_texture_ex(tekstura, draw_position.x, draw_position.y, WHITE, params);
 
         let attack_amount = -f32::powi(attack_time / 0.3 - 1.0, 3);
-        let sword_dist = 18.0 + 22.0 * attack_amount.max(0.0);
+        let sword_dist = razdalja_meca + 22.0 * attack_amount.max(0.0);
 
         let center = draw_position + vec2(16.0, 16.0);
         let sword_offset = Vec2::from_angle(rotacija) * sword_dist;
@@ -162,14 +180,14 @@ impl Player {
         params.rotation = f32::atan2(sword_offset.y, sword_offset.x) + PI / 4.0;
         draw_texture_ex(tekstura, sword_draw_position.x, sword_draw_position.y, WHITE, params);
 
+        if is_mouse_button_pressed(MouseButton::Left) {
+            let pos = center + sword_offset / 1.5 - vec2(16.0, 16.0);
+            draw_rectangle(pos.x, pos.y, 32.0, 32.0, Color::new(1.0, 0.0, 0.0, 0.5));
+        }
+
         let text_params = TextParams { font_size: 32, font_scale: 0.25, ..Default::default() };
         let dimensions = measure_text(ime, None, text_params.font_size, text_params.font_scale);
         draw_text_ex(ime, draw_position.x + 16.0 - dimensions.width / 2.0, position.y - 5.0, text_params);
-    }
-
-    pub fn get_rotation(&self) -> f32 {
-        let to = pozicija_miske_v_svetu() - (self.position + vec2(8.0, 12.0));
-        f32::atan2(to.y, to.x)
     }
 
     pub fn get_anim(&self) -> &Animacija {
