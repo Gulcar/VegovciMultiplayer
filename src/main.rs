@@ -22,23 +22,6 @@ fn screen_units_height() -> f32 {
 
 thread_local! {
     static KAMERA_POS: Cell<Vec2> = Cell::new(Vec2::ZERO);
-    static IS_SERVER: bool = calc_is_server();
-}
-
-#[allow(dead_code)] // rust ne ve da je uporabljeno v thread_local?
-fn calc_is_server() -> bool {
-    if let Some(s) = env::args().last() {
-        return s == "host";
-    }
-    false
-}
-
-fn is_server() -> bool {
-    let mut ret = false;
-    IS_SERVER.with(|server| {
-        ret = *server;
-    });
-    ret
 }
 
 fn posodobi_kamero() {
@@ -118,17 +101,32 @@ fn generate_map_colliders(map_image: Image, offset: Vec2) -> Vec<StaticenAABBRef
     colliders
 }
 
+fn print_usage_exit(first_arg: &str) -> ! {
+    eprintln!("ERROR incorect parameters!");
+    eprintln!("usage: {} <user_name> <server_ip>", first_arg);
+    eprintln!("or   : {} <user_name> host", first_arg);
+    std::process::exit(1)
+}
+
 #[macroquad::main("VegovciMultiplayer")]
 async fn main() {
     println!("pozdravljen svet!");
 
-    if is_server() {
+    let args: Vec<String> = env::args().collect();
+    if args.len() != 3 {
+        print_usage_exit(&args[0]);
+    }
+    let user_name = &args[1];
+    let server_ip = &args[2];
+    let is_host = args[2] == "host";
+
+    if is_host {
         println!("v nacinu streznika!");
     }
 
     let mut net_interface = {
-        if is_server() { NetInterface::Server(Server::new()) }
-        else { NetInterface::Client(Client::new("127.0.0.1")) }
+        if is_host { NetInterface::Server(Server::new(user_name.clone())) }
+        else { NetInterface::Client(Client::new(&server_ip, user_name.clone())) }
     };
 
     let vegovec_texture = load_texture_nearest("assets/vegovec.png").await.unwrap();
@@ -142,7 +140,7 @@ async fn main() {
 
     let _test_aabb = physics::dodaj_dinamicen_obj(AABB::new(-32.0, 16.0, 16.0, 32.0));
 
-    let mut player = Player::new("epic gamer".to_string(), vec2(0.0, 0.0), vegovec_texture);
+    let mut player = Player::new(user_name.clone(), vec2(0.0, 0.0), vegovec_texture);
 
     println!("stevilo staticnih objektov: {}", physics::st_staticnih_obj());
     println!("stevilo dinamicnih objektov: {}", physics::st_dinamicnih_obj());
