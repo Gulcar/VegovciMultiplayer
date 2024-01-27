@@ -159,9 +159,11 @@ async fn main() {
             NetInterface::Client(ref mut client) => {
                 client.recv();
                 let state = State {
+                    id: client.id,
                     position: (player.position.x, player.position.y),
                     rotation: player.get_rotation(),
-                    id: client.id,
+                    anim_frame: player.animacije[player.trenutna_anim].izr_frame_xy().into(),
+                    attack_time: player.attack_time,
                 };
                 let send_buf = bincode::serialize(&Message::PlayerState(state)).unwrap();
                 client.send(&send_buf);
@@ -183,10 +185,10 @@ async fn main() {
 
         match net_interface {
             NetInterface::Server(ref server) => {
-                server.narisi_cliente();
+                server.narisi_cliente(&player.texture);
             }
             NetInterface::Client(ref client) => {
-                client.narisi_cliente();
+                client.narisi_cliente(&player.texture);
             }
         }
 

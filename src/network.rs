@@ -1,5 +1,5 @@
 use std::{net::{TcpStream, TcpListener}, io::{ErrorKind, Write, BufReader, self}};
-use macroquad::shapes::draw_rectangle_lines;
+use macroquad::prelude::*;
 use serde::{Serialize, Deserialize};
 
 use crate::Player;
@@ -126,9 +126,11 @@ impl Server {
         }
     }
 
-    pub fn narisi_cliente(&self) {
+    pub fn narisi_cliente(&self, tekstura: &Texture2D) {
         for conn in &self.clients {
-            draw_rectangle_lines(conn.state.position.0, conn.state.position.1, 16.0, 28.0, 1.0, macroquad::color::RED);
+            //draw_rectangle_lines(conn.state.position.0, conn.state.position.1, 16.0, 28.0, 1.0, macroquad::color::RED);
+            let state = &conn.state;
+            Player::narisi_iz(tekstura, state.position.into(), state.anim_frame.into(), state.rotation, state.attack_time, "peer");
         }
     }
 
@@ -137,9 +139,11 @@ impl Server {
             .map(|c| c.state.clone())
             .collect();
         states.push(State {
+            id: 0, // gazda/host id
             position: (player.position.x, player.position.y),
             rotation: player.get_rotation(),
-            id: 0, // gazda/host id
+            anim_frame: player.get_anim().izr_frame_xy().into(),
+            attack_time: player.attack_time,
         });
         let send_buf = bincode::serialize(&Message::AllPlayersState(states)).unwrap();
         self.send_to_all(&send_buf);
@@ -198,12 +202,13 @@ impl Client {
         }
     }
 
-    pub fn narisi_cliente(&self) {
+    pub fn narisi_cliente(&self, tekstura: &Texture2D) {
         for state in &self.net_states {
             if state.id == self.id {
                 continue;
             }
-            draw_rectangle_lines(state.position.0, state.position.1, 16.0, 28.0, 1.0, macroquad::color::RED);
+            //draw_rectangle_lines(state.position.0, state.position.1, 16.0, 28.0, 1.0, macroquad::color::RED);
+            Player::narisi_iz(tekstura, state.position.into(), state.anim_frame.into(), state.rotation, state.attack_time, "peer");
         }
     }
 }
@@ -215,9 +220,11 @@ pub enum NetInterface {
 
 #[derive(Serialize, Deserialize, Debug, Default, Clone)]
 pub struct State {
+    pub id: u32,
     pub position: (f32, f32),
     pub rotation: f32,
-    pub id: u32,
+    pub anim_frame: (f32, f32),
+    pub attack_time: f32,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
