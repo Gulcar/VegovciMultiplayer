@@ -2,7 +2,8 @@ use std::{net::{TcpStream, TcpListener, SocketAddr}, io::{ErrorKind, Write, BufR
 use macroquad::prelude::*;
 use serde::{Serialize, Deserialize};
 
-use crate::Player;
+use crate::{Player, DinamicenAABBRef, physics, LAYER_PLAYER};
+use crate::AABB;
 
 const PORT: u16 = 5356;
 
@@ -39,6 +40,8 @@ struct ServerConnection {
     state: State,
     addr: SocketAddr,
     user_name: String,
+    aabb_ref: DinamicenAABBRef,
+    health: i32,
 }
 
 pub struct Server {
@@ -46,6 +49,7 @@ pub struct Server {
     clients: Vec<ServerConnection>,
     naslednji_id: u32,
     user_name: String,
+    pub health: i32,
 }
 
 impl Server {
@@ -57,6 +61,7 @@ impl Server {
             clients: Vec::new(),
             naslednji_id: 1,
             user_name,
+            health: 100,
         }
     }
 
@@ -92,6 +97,8 @@ impl Server {
                         },
                         addr,
                         user_name: String::new(),
+                        aabb_ref: physics::dodaj_dinamicen_obj(AABB::new(0.0, 0.0, 16.0, 28.0), LAYER_PLAYER, 0, self.naslednji_id),
+                        health: 100,
                     });
                     self.naslednji_id += 1;
                 },
@@ -105,19 +112,69 @@ impl Server {
         }
     }
 
+    fn handle_attack(&mut self, hit_list: Vec<(u32, AABB)>, exclude_id: u32) {
+        for (id, _aabb) in &hit_list {
+            if *id == exclude_id {
+                continue;
+            }
+
+            if *id == 0 {
+                self.health -= 10;
+                if self.health <= 0 {
+                    self.health = 0;
+                    println!("host umrl");
+                }
+            }
+
+            else if let Some(client) = self.clients.iter_mut().find(|c| c.state.id == *id) {
+                client.health -= 10;
+                if client.health <= 0 {
+                    client.health = 0;
+                    println!("client umrl");
+                }
+                let msg = Message::Attack(client.health);
+                let send_buf = bincode::serialize(&msg).unwrap();
+                client.reader.get_mut().write(&send_buf).unwrap();
+            }
+        }
+    }
+
+    pub fn attack_host(&mut self, player: &Player) {
+        let hitbox = Player::calc_sword_hitbox(player.position, player.attack_time, player.razdalja_meca, player.rotation);
+        let found = physics::area_query(hitbox, LAYER_PLAYER);
+        println!("found {}: {:?}", found.len(), found);
+
+        self.handle_attack(found, 0);
+    }
+
+    fn attack(&mut self, conn_i: usize) {
+        let client = &self.clients[conn_i];
+        let state = &client.state;
+
+        let hitbox = Player::calc_sword_hitbox(state.position.into(), state.attack_time, state.razdalja_meca, state.rotation);
+        let found = physics::area_query(hitbox, LAYER_PLAYER);
+        println!("found {}: {:?}", found.len(), found);
+
+        self.handle_attack(found, state.id);
+    }
+
     fn handle_msg(&mut self, msg: Message, conn_i: usize) {
+        let client = &mut self.clients[conn_i];
         match msg {
             Message::PlayerState(state) => {
+                let id = client.state.id;
+                client.state = state.clone();
+                client.state.id = id;
+
+                physics::premakni_obj_na(&client.aabb_ref, client.state.position.into());
+
                 if state.attack_time == 0.0 {
-                    // TODO:
+                    self.attack(conn_i);
                 }
-                let id = self.clients[conn_i].state.id;
-                self.clients[conn_i].state = state;
-                self.clients[conn_i].state.id = id;
             },
             Message::UserName((_id, name)) => {
-                self.clients[conn_i].user_name = name.clone();
-                let msg = Message::UserName((self.clients[conn_i].state.id, name));
+                client.user_name = name.clone();
+                let msg = Message::UserName((client.state.id, name));
                 let send_buf = bincode::serialize(&msg).unwrap();
                 self.send_to_all(&send_buf);
             }
@@ -162,7 +219,7 @@ impl Server {
         for conn in &self.clients {
             //draw_rectangle_lines(conn.state.position.0, conn.state.position.1, 16.0, 28.0, 1.0, macroquad::color::RED);
             let state = &conn.state;
-            Player::narisi_iz(tekstura, state.position.into(), state.anim_frame.into(), state.rotation, state.radzalja_meca, state.attack_time, &conn.user_name);
+            Player::narisi_iz(tekstura, state.position.into(), state.anim_frame.into(), state.rotation, state.razdalja_meca, state.attack_time, &conn.user_name, -1);
         }
     }
 
@@ -176,7 +233,7 @@ impl Server {
             rotation: player.rotation,
             anim_frame: player.get_anim().izr_frame_xy().into(),
             attack_time: player.attack_time,
-            radzalja_meca: player.razdalja_meca,
+            razdalja_meca: player.razdalja_meca,
         });
         let send_buf = bincode::serialize(&Message::AllPlayersState(states)).unwrap();
         self.send_to_all(&send_buf);
@@ -188,6 +245,7 @@ pub struct Client {
     reader: BufReader<TcpStream>,
     net_states: Vec<State>,
     net_user_names: HashMap<u32, String>,
+    pub health: i32,
 }
 
 impl Client {
@@ -201,6 +259,7 @@ impl Client {
             reader: BufReader::new(stream),
             net_states: Vec::new(),
             net_user_names: HashMap::new(),
+            health: 100,
         }
     }
 
@@ -219,6 +278,9 @@ impl Client {
             },
             Message::UserName((id, name)) => {
                 self.net_user_names.insert(id, name);
+            }
+            Message::Attack(new_health) => {
+                self.health = new_health;
             }
             _ => {},
         }
@@ -251,7 +313,7 @@ impl Client {
             }
             //draw_rectangle_lines(state.position.0, state.position.1, 16.0, 28.0, 1.0, macroquad::color::RED);
             let name = self.net_user_names.get(&state.id).unwrap_or(&default_name);
-            Player::narisi_iz(tekstura, state.position.into(), state.anim_frame.into(), state.rotation, state.radzalja_meca, state.attack_time, name);
+            Player::narisi_iz(tekstura, state.position.into(), state.anim_frame.into(), state.rotation, state.razdalja_meca, state.attack_time, name, -1);
         }
     }
 }
@@ -268,7 +330,7 @@ pub struct State {
     pub rotation: f32,
     pub anim_frame: (f32, f32),
     pub attack_time: f32,
-    pub radzalja_meca: f32,
+    pub razdalja_meca: f32,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -277,5 +339,6 @@ pub enum Message {
     UserName((u32, String)),
     PlayerState(State),
     AllPlayersState(Vec<State>),
+    Attack(i32),
 }
 

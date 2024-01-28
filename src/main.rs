@@ -138,7 +138,7 @@ async fn main() {
     //map_aabb_refs.push(physics::dodaj_staticen_obj(AABB::new(-96.0, 48.0, 192.0, 32.0)));
     //map_aabb_refs.push(physics::dodaj_staticen_obj(AABB::new(32.0, 16.0, 16.0, 32.0)));
 
-    let _test_aabb = physics::dodaj_dinamicen_obj(AABB::new(-32.0, 16.0, 16.0, 32.0), LAYER_MAP, LAYER_MAP | LAYER_PLAYER | LAYER_SWORD);
+    let _test_aabb = physics::dodaj_dinamicen_obj(AABB::new(-32.0, 16.0, 16.0, 32.0), LAYER_MAP, LAYER_MAP | LAYER_PLAYER | LAYER_SWORD, 0);
 
     let mut player = Player::new(user_name.clone(), vec2(0.0, 0.0), vegovec_texture);
 
@@ -152,17 +152,22 @@ async fn main() {
             NetInterface::Server(ref mut server) => {
                 server.listen();
                 server.recv();
+                player.health = server.health;
+                if player.attack_time == 0.0 {
+                    server.attack_host(&player);
+                }
                 server.poslji_vse_state(&player);
             },
             NetInterface::Client(ref mut client) => {
                 client.recv();
+                player.health = client.health;
                 let state = State {
                     id: client.id,
                     position: (player.position.x, player.position.y),
                     rotation: player.rotation,
                     anim_frame: player.animacije[player.trenutna_anim].izr_frame_xy().into(),
                     attack_time: player.attack_time,
-                    radzalja_meca: player.razdalja_meca,
+                    razdalja_meca: player.razdalja_meca,
                 };
                 let send_buf = bincode::serialize(&Message::PlayerState(state)).unwrap();
                 client.send(&send_buf);

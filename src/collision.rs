@@ -1,7 +1,7 @@
 use std::sync::Mutex;
 use macroquad::prelude::*;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct AABB {
     pub x: f32,
     pub y: f32,
@@ -16,6 +16,14 @@ impl AABB {
 
     pub fn from_vec(pos: Vec2, size: Vec2) -> AABB {
         AABB { x: pos.x, y: pos.y, w: size.x, h: size.y }
+    }
+
+    pub fn overlaps(&self, aabb: AABB) -> bool {
+        let a = self;
+        let b = &aabb;
+        let coll_x = (b.x >= a.x && b.x <= a.x + a.w) || (a.x >= b.x && a.x <= b.x + b.w);
+        let coll_y = (b.y >= a.y && b.y <= a.y + a.h) || (a.y >= b.y && a.y <= b.y + b.h);
+        return coll_x && coll_y;
     }
 }
 
@@ -55,6 +63,7 @@ struct Objekt {
     aabb: AABB,
     layer: u32,
     mask: u32,
+    user_id: u32,
 }
 
 pub const LAYER_MAP: u32 = 1 << 0;
@@ -82,12 +91,14 @@ pub mod physics {
         });
     }
 
-    pub fn dodaj_dinamicen_obj(aabb: AABB, layer: u32, mask: u32) -> DinamicenAABBRef {
+    pub fn dodaj_dinamicen_obj(aabb: AABB, layer: u32, mask: u32, user_id: u32) -> DinamicenAABBRef {
         let mut physics_mutex_guard = GLOBAL_PHYSICS.lock().unwrap();
         let physics = physics_mutex_guard.as_mut().unwrap();
 
+        assert_eq!(layer.count_ones(), 1);
+
         let i = physics.dinamicni.vstavi(Objekt {
-            aabb, layer, mask
+            aabb, layer, mask, user_id
         });
         DinamicenAABBRef(i)
     }
@@ -96,8 +107,10 @@ pub mod physics {
         let mut physics_mutex_guard = GLOBAL_PHYSICS.lock().unwrap();
         let physics = physics_mutex_guard.as_mut().unwrap();
 
+        assert_eq!(layer.count_ones(), 1);
+
         let i = physics.staticni.vstavi(Objekt {
-            aabb, layer, mask
+            aabb, layer, mask, user_id: 0
         });
         StaticenAABBRef(i)
     }
@@ -123,6 +136,15 @@ pub mod physics {
         let obj = physics.dinamicni.elements[aabb_ref.0].as_mut().unwrap();
         obj.aabb.x += premik.x;
         obj.aabb.y += premik.y;
+    }
+
+    pub fn premakni_obj_na(aabb_ref: &DinamicenAABBRef, pozicija: Vec2) {
+        let mut physics_mutex_guard = GLOBAL_PHYSICS.lock().unwrap();
+        let physics = physics_mutex_guard.as_mut().unwrap();
+
+        let obj = physics.dinamicni.elements[aabb_ref.0].as_mut().unwrap();
+        obj.aabb.x = pozicija.x;
+        obj.aabb.y = pozicija.y;
     }
 
     pub fn pozicija_obj(aabb_ref: &DinamicenAABBRef) -> Vec2 {
@@ -197,6 +219,24 @@ pub mod physics {
                 }
             }
         }
+    }
+
+    /// vrne vse dinamicne aabbje v obmocju z id
+    pub fn area_query(area: AABB, mask: u32) -> Vec<(u32, AABB)> {
+        let mut physics_mutex_guard = GLOBAL_PHYSICS.lock().unwrap();
+        let physics = physics_mutex_guard.as_mut().unwrap();
+
+        let mut result = Vec::new();
+
+        for obj in physics.dinamicni.elements.iter() {
+            if let Some(o) = obj {
+                if (mask & o.layer) > 0 && o.aabb.overlaps(area) {
+                    result.push((o.user_id, o.aabb));
+                }
+            }
+        }
+
+        result
     }
 
     pub fn narisi_aabbje() {

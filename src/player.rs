@@ -57,6 +57,8 @@ pub struct Player {
     pub rotation: f32,
     pub ime: String,
 
+    pub health: i32,
+
     velocity_y: f32,
     jumps_allowed: i32,
     pub attack_time: f32,
@@ -77,12 +79,13 @@ impl Player {
             position,
             rotation: 0.0,
             ime,
+            health: 100,
             velocity_y: 0.0,
             jumps_allowed: 0,
             attack_time: 99.0,
             texture,
-            aabb_ref: physics::dodaj_dinamicen_obj(AABB::from_vec(position, vec2(16.0, 28.0)), LAYER_PLAYER, LAYER_PLAYER | LAYER_MAP),
-            sword_ref: physics::dodaj_dinamicen_obj(AABB::from_vec(position, vec2(10.0, 10.0)), LAYER_SWORD, LAYER_SWORD | LAYER_MAP),
+            aabb_ref: physics::dodaj_dinamicen_obj(AABB::from_vec(position, vec2(16.0, 28.0)), LAYER_PLAYER, LAYER_PLAYER | LAYER_MAP, 0),
+            sword_ref: physics::dodaj_dinamicen_obj(AABB::from_vec(position, vec2(10.0, 10.0)), LAYER_SWORD, LAYER_SWORD | LAYER_MAP, 10),
             razdalja_meca: 0.0,
             animacije: vec![
                 Animacija::new(Rect::new(0.0, 32.0, 32.0, 32.0), 2, 0.350, true), // idle 0
@@ -161,10 +164,10 @@ impl Player {
 
     pub fn narisi(&self) {
         let position = physics::pozicija_obj(&self.aabb_ref);
-        Player::narisi_iz(&self.texture, position, self.get_anim().izr_frame_xy(), self.rotation, self.razdalja_meca, self.attack_time, &self.ime);
+        Player::narisi_iz(&self.texture, position, self.get_anim().izr_frame_xy(), self.rotation, self.razdalja_meca, self.attack_time, &self.ime, self.health);
     }
 
-    pub fn narisi_iz(tekstura: &Texture2D, position: Vec2, anim_frame_xy: Vec2, rotacija: f32, razdalja_meca: f32, attack_time: f32, ime: &str) {
+    pub fn narisi_iz(tekstura: &Texture2D, position: Vec2, anim_frame_xy: Vec2, rotacija: f32, razdalja_meca: f32, attack_time: f32, ime: &str, health: i32) {
         let draw_position = position - vec2(8.0, 4.0);
         let mut params = texture_params_source(anim_frame_xy.x, anim_frame_xy.y, 32.0, 32.0);
         params.flip_x = rotacija > PI / 2.0 || rotacija < -PI / 2.0;
@@ -180,18 +183,36 @@ impl Player {
         params.rotation = f32::atan2(sword_offset.y, sword_offset.x) + PI / 4.0;
         draw_texture_ex(tekstura, sword_draw_position.x, sword_draw_position.y, WHITE, params);
 
-        if is_mouse_button_pressed(MouseButton::Left) {
-            let pos = center + sword_offset / 1.5 - vec2(16.0, 16.0);
-            draw_rectangle(pos.x, pos.y, 32.0, 32.0, Color::new(1.0, 0.0, 0.0, 0.5));
+        if attack_time == 0.0 {
+            let hitbox = Player::calc_sword_hitbox(position, attack_time, razdalja_meca, rotacija);
+            draw_rectangle(hitbox.x, hitbox.y, hitbox.w, hitbox.h, RED);
         }
 
         let text_params = TextParams { font_size: 32, font_scale: 0.25, ..Default::default() };
         let dimensions = measure_text(ime, None, text_params.font_size, text_params.font_scale);
         draw_text_ex(ime, draw_position.x + 16.0 - dimensions.width / 2.0, position.y - 5.0, text_params);
+
+        if health != -1 {
+            const WIDTH: f32 = 25.0;
+            draw_rectangle(center.x - WIDTH / 2.0, position.y - 3.6, WIDTH, 3.0, BLACK);
+            let fill = WIDTH * health as f32 / 100.0;
+            draw_rectangle(center.x - WIDTH / 2.0, position.y - 3.6, fill, 3.0, GREEN);
+        }
     }
 
     pub fn get_anim(&self) -> &Animacija {
         &self.animacije[self.trenutna_anim]
+    }
+
+    pub fn calc_sword_hitbox(player_pos: Vec2, attack_time: f32, razdalja_meca: f32, rotacija: f32) -> AABB {
+        let center = player_pos - vec2(8.0, 4.0) + vec2(16.0, 16.0);
+
+        let attack_amount = -f32::powi(attack_time / 0.3 - 1.0, 3);
+        let sword_dist = razdalja_meca + 22.0 * attack_amount.max(0.0);
+        let sword_offset = Vec2::from_angle(rotacija) * sword_dist;
+
+        let pos = center + sword_offset / 1.5 - vec2(16.0, 16.0);
+        AABB::from_vec(pos, vec2(32.0, 32.0))
     }
 }
 
