@@ -22,6 +22,7 @@ fn screen_units_height() -> f32 {
 
 thread_local! {
     static KAMERA_POS: Cell<Vec2> = Cell::new(Vec2::ZERO);
+    static SHOW_COLLIDERS: Cell<bool> = Cell::new(false);
 }
 
 fn posodobi_kamero() {
@@ -113,12 +114,20 @@ async fn main() {
     println!("pozdravljen svet!");
 
     let args: Vec<String> = env::args().collect();
-    if args.len() != 3 {
+    if args.len() < 3 {
         print_usage_exit(&args[0]);
     }
     let user_name = &args[1];
     let server_ip = &args[2];
     let is_host = args[2] == "host";
+
+    // dodatni argumenti
+    for i in 3..args.len() {
+        match args[i].as_str() {
+            "--colliders" => SHOW_COLLIDERS.set(true),
+            _ => panic!("unknown option: {}", args[i])
+        }
+    }
 
     if is_host {
         println!("v nacinu streznika!");
@@ -152,6 +161,7 @@ async fn main() {
             NetInterface::Server(ref mut server) => {
                 server.listen();
                 server.recv();
+                server.posodobi(delta, &mut player);
                 player.health = server.health;
                 if player.attack_time == 0.0 {
                     server.attack_host(&player);
@@ -159,7 +169,7 @@ async fn main() {
                 server.poslji_vse_state(&player);
             },
             NetInterface::Client(ref mut client) => {
-                client.recv();
+                client.recv(&mut player);
                 player.health = client.health;
                 let state = State {
                     id: client.id,
@@ -185,7 +195,9 @@ async fn main() {
         draw_texture(&map_texture, -256.0, -128.0, WHITE);
         player.narisi();
 
-        physics::narisi_aabbje();
+        if SHOW_COLLIDERS.get() {
+            physics::narisi_aabbje();
+        }
 
         match net_interface {
             NetInterface::Server(ref server) => {
@@ -202,7 +214,7 @@ async fn main() {
             font_scale: 0.35,
             ..Default::default()
         });
-        
+
         next_frame().await;
     }
 }

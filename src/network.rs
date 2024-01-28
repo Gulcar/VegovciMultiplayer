@@ -6,6 +6,7 @@ use crate::{Player, DinamicenAABBRef, physics, LAYER_PLAYER};
 use crate::AABB;
 
 const PORT: u16 = 5356;
+const RESPAWN_TIME: f32 = 3.0;
 
 fn prepare_socket(stream: &mut TcpStream) {
     stream.set_nonblocking(true).unwrap();
@@ -42,6 +43,7 @@ struct ServerConnection {
     user_name: String,
     aabb_ref: DinamicenAABBRef,
     health: i32,
+    respawn_timer: f32,
 }
 
 pub struct Server {
@@ -50,6 +52,7 @@ pub struct Server {
     naslednji_id: u32,
     user_name: String,
     pub health: i32,
+    respawn_timer: f32,
 }
 
 impl Server {
@@ -62,6 +65,7 @@ impl Server {
             naslednji_id: 1,
             user_name,
             health: 100,
+            respawn_timer: 0.0,
         }
     }
 
@@ -99,6 +103,7 @@ impl Server {
                         user_name: String::new(),
                         aabb_ref: physics::dodaj_dinamicen_obj(AABB::new(0.0, 0.0, 16.0, 28.0), LAYER_PLAYER, 0, self.naslednji_id),
                         health: 100,
+                        respawn_timer: 0.0,
                     });
                     self.naslednji_id += 1;
                 },
@@ -113,24 +118,29 @@ impl Server {
     }
 
     fn handle_attack(&mut self, hit_list: Vec<(u32, AABB)>, exclude_id: u32) {
+        //println!("attack_hit {}: {:?}", hit_list.len(), hit_list);
+
         for (id, _aabb) in &hit_list {
             if *id == exclude_id {
                 continue;
             }
 
             if *id == 0 {
-                self.health -= 10;
-                if self.health <= 0 {
-                    self.health = 0;
-                    println!("host umrl");
+                if self.health > 0 {
+                    self.health -= 10;
+                    if self.health <= 0 {
+                        self.health = 0;
+                        self.respawn_timer = RESPAWN_TIME;
+                        println!("umrl id {}", *id);
+                    }
                 }
             }
-
-            else if let Some(client) = self.clients.iter_mut().find(|c| c.state.id == *id) {
+            else if let Some(client) = self.clients.iter_mut().find(|c| c.state.id == *id && c.health > 0) {
                 client.health -= 10;
                 if client.health <= 0 {
                     client.health = 0;
-                    println!("client umrl");
+                    client.respawn_timer = RESPAWN_TIME;
+                    println!("umrl id {}", *id);
                 }
                 let msg = Message::Attack(client.health);
                 let send_buf = bincode::serialize(&msg).unwrap();
@@ -142,7 +152,6 @@ impl Server {
     pub fn attack_host(&mut self, player: &Player) {
         let hitbox = Player::calc_sword_hitbox(player.position, player.attack_time, player.razdalja_meca, player.rotation);
         let found = physics::area_query(hitbox, LAYER_PLAYER);
-        println!("found {}: {:?}", found.len(), found);
 
         self.handle_attack(found, 0);
     }
@@ -153,7 +162,6 @@ impl Server {
 
         let hitbox = Player::calc_sword_hitbox(state.position.into(), state.attack_time, state.razdalja_meca, state.rotation);
         let found = physics::area_query(hitbox, LAYER_PLAYER);
-        println!("found {}: {:?}", found.len(), found);
 
         self.handle_attack(found, state.id);
     }
@@ -217,6 +225,7 @@ impl Server {
 
     pub fn narisi_cliente(&self, tekstura: &Texture2D) {
         for conn in &self.clients {
+            if conn.health <= 0 { continue; }
             //draw_rectangle_lines(conn.state.position.0, conn.state.position.1, 16.0, 28.0, 1.0, macroquad::color::RED);
             let state = &conn.state;
             Player::narisi_iz(tekstura, state.position.into(), state.anim_frame.into(), state.rotation, state.razdalja_meca, state.attack_time, &conn.user_name, -1);
@@ -225,18 +234,50 @@ impl Server {
 
     pub fn poslji_vse_state(&mut self, player: &Player) {
         let mut states: Vec<State> = self.clients.iter()
+            .filter(|c| c.health > 0)
             .map(|c| c.state.clone())
             .collect();
-        states.push(State {
-            id: 0, // gazda/host id
-            position: (player.position.x, player.position.y),
-            rotation: player.rotation,
-            anim_frame: player.get_anim().izr_frame_xy().into(),
-            attack_time: player.attack_time,
-            razdalja_meca: player.razdalja_meca,
-        });
+        if self.health > 0 {
+            states.push(State {
+                id: 0, // gazda/host id
+                position: (player.position.x, player.position.y),
+                rotation: player.rotation,
+                anim_frame: player.get_anim().izr_frame_xy().into(),
+                attack_time: player.attack_time,
+                razdalja_meca: player.razdalja_meca,
+            });
+        }
         let send_buf = bincode::serialize(&Message::AllPlayersState(states)).unwrap();
         self.send_to_all(&send_buf);
+    }
+
+    fn get_respawn_location() -> Vec2 {
+        Vec2::new(
+            rand::gen_range(-200.0, 200.0),
+            -250.0
+        )
+    }
+
+    pub fn posodobi(&mut self, delta: f32, player: &mut Player) {
+        if self.health <= 0 {
+            self.respawn_timer -= delta;
+            if self.respawn_timer <= 0.0 {
+                self.health = 100;
+                player.nastavi_pozicijo(Server::get_respawn_location());
+            }
+        }
+
+        for client in &mut self.clients {
+            if client.health <= 0 {
+                client.respawn_timer -= delta;
+                if client.respawn_timer <= 0.0 {
+                    client.health = 100;
+                    let msg = Message::Respawn(Server::get_respawn_location().into());
+                    let send_buf = bincode::serialize(&msg).unwrap();
+                    client.reader.get_mut().write(&send_buf).unwrap();
+                }
+            }
+        }
     }
 }
 
@@ -267,7 +308,7 @@ impl Client {
         self.reader.get_mut().write(bytes).unwrap();
     }
 
-    pub fn handle_msg(&mut self, msg: Message) {
+    pub fn handle_msg(&mut self, msg: Message, player: &mut Player) {
         match msg {
             Message::DodeljenId(id) => {
                 self.id = id;
@@ -282,16 +323,20 @@ impl Client {
             Message::Attack(new_health) => {
                 self.health = new_health;
             }
+            Message::Respawn((x, y)) => {
+                self.health = 100;
+                player.nastavi_pozicijo(Vec2::new(x, y));
+            }
             _ => {},
         }
     }
 
-    pub fn recv(&mut self) {
+    pub fn recv(&mut self, player: &mut Player) {
         loop {
             match bincode::deserialize_from::<&mut BufReader<TcpStream>, Message>(&mut self.reader) {
                 Ok(msg) => {
                     //println!("recv: {:?}", msg);
-                    self.handle_msg(msg);
+                    self.handle_msg(msg, player);
                 },
                 Err(e) => {
                     if handle_bincode_error(e) {
@@ -340,5 +385,6 @@ pub enum Message {
     PlayerState(State),
     AllPlayersState(Vec<State>),
     Attack(i32),
+    Respawn((f32, f32)),
 }
 

@@ -2,7 +2,7 @@ use std::f32::consts::PI;
 
 use macroquad::prelude::*;
 
-use crate::{texture_params_source, DinamicenAABBRef, physics, AABB, pozicija_miske_v_svetu, KAMERA_POS, lerp};
+use crate::{texture_params_source, DinamicenAABBRef, physics, AABB, pozicija_miske_v_svetu, KAMERA_POS, lerp, SHOW_COLLIDERS};
 use crate::{LAYER_MAP, LAYER_PLAYER, LAYER_SWORD};
 
 const PLAYER_SPEED: f32 = 75.0;
@@ -96,6 +96,10 @@ impl Player {
     }
 
     pub fn posodobi(&mut self, delta: f32) {
+        if self.health <= 0 {
+            return;
+        }
+
         let nova_pozicija = physics::pozicija_obj(&self.aabb_ref);
         let mut is_grounded = false;
         if (nova_pozicija.y - self.position.y).abs() < 0.00001 {
@@ -163,6 +167,9 @@ impl Player {
     }
 
     pub fn narisi(&self) {
+        if self.health <= 0 {
+            return;
+        }
         let position = physics::pozicija_obj(&self.aabb_ref);
         Player::narisi_iz(&self.texture, position, self.get_anim().izr_frame_xy(), self.rotation, self.razdalja_meca, self.attack_time, &self.ime, self.health);
     }
@@ -183,7 +190,7 @@ impl Player {
         params.rotation = f32::atan2(sword_offset.y, sword_offset.x) + PI / 4.0;
         draw_texture_ex(tekstura, sword_draw_position.x, sword_draw_position.y, WHITE, params);
 
-        if attack_time == 0.0 {
+        if SHOW_COLLIDERS.get() && attack_time == 0.0 {
             let hitbox = Player::calc_sword_hitbox(position, attack_time, razdalja_meca, rotacija);
             draw_rectangle(hitbox.x, hitbox.y, hitbox.w, hitbox.h, RED);
         }
@@ -213,6 +220,12 @@ impl Player {
 
         let pos = center + sword_offset / 1.5 - vec2(16.0, 16.0);
         AABB::from_vec(pos, vec2(32.0, 32.0))
+    }
+
+    pub fn nastavi_pozicijo(&mut self, position: Vec2) {
+        self.position = position;
+        physics::premakni_obj_na(&self.aabb_ref, position);
+        physics::premakni_obj_na(&self.sword_ref, position);
     }
 }
 
