@@ -5,6 +5,7 @@ use std::env;
 mod player;
 mod collision;
 mod network;
+mod particles;
 
 use player::*;
 use collision::*;
@@ -64,6 +65,15 @@ fn texture_params_source(x: f32, y: f32, w: f32, h: f32) -> DrawTextureParams {
 
 fn lerp(a: f32, b: f32, t: f32) -> f32 {
     a * (1.0 - t) + b * t
+}
+
+fn lerp_color(a: Color, b: Color, t: f32) -> Color {
+    Color::new(
+        a.r * (1.0 - t) + b.r * t,
+        a.g * (1.0 - t) + b.g * t,
+        a.b * (1.0 - t) + b.b * t,
+        a.a * (1.0 - t) + b.a * t
+    )
 }
 
 fn generate_map_colliders(map_image: Image, offset: Vec2) -> Vec<StaticenAABBRef> {
@@ -142,6 +152,7 @@ async fn main() {
     let map_texture = load_texture_nearest("assets/map.png").await.unwrap();
 
     physics::init();
+    particles::init();
 
     let _map_aabb_refs = generate_map_colliders(map_texture.get_texture_data(), vec2(-256.0, -128.0));
     //map_aabb_refs.push(physics::dodaj_staticen_obj(AABB::new(-96.0, 48.0, 192.0, 32.0)));
@@ -194,6 +205,8 @@ async fn main() {
 
         draw_texture(&map_texture, -256.0, -128.0, WHITE);
         player.narisi();
+
+        particles::narisi(delta);
 
         if SHOW_COLLIDERS.get() {
             physics::narisi_aabbje();

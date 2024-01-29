@@ -2,13 +2,47 @@ use std::f32::consts::PI;
 
 use macroquad::prelude::*;
 
-use crate::{texture_params_source, DinamicenAABBRef, physics, AABB, pozicija_miske_v_svetu, KAMERA_POS, lerp, SHOW_COLLIDERS};
+use crate::particles::ParticleParams;
+use crate::{texture_params_source, DinamicenAABBRef, physics, AABB, pozicija_miske_v_svetu, KAMERA_POS, lerp, SHOW_COLLIDERS, particles};
 use crate::{LAYER_MAP, LAYER_PLAYER, LAYER_SWORD};
 
 const PLAYER_SPEED: f32 = 75.0;
 const JUMP_VEL: f32 = 500.0;
 const MAX_VEL: f32 = 600.0;
 const GRAVITY: f32 = 1500.0;
+
+const HIT_PARTICLES: ParticleParams = ParticleParams {
+    amount: 10..20,
+    lifetime: 0.5,
+    speed_start: 100.0..150.0,
+    speed_end: 0.0..50.0,
+    color_start: ORANGE..RED,
+    color_end: RED..MAROON,
+    size_start: 4.0..8.0,
+    size_end: 0.0..0.0,
+};
+
+const JUMP_PARTICLES: ParticleParams = ParticleParams {
+    amount: 3..6,
+    lifetime: 0.2,
+    speed_start: 100.0..150.0,
+    speed_end: 0.0..100.0,
+    color_start: WHITE..GRAY,
+    color_end: DARKGRAY..GRAY,
+    size_start: 3.0..5.0,
+    size_end: 0.0..0.0,
+};
+
+const COOL_PARTICLES: ParticleParams = ParticleParams {
+    amount: 100..200,
+    lifetime: 2.0,
+    speed_start: 50.0..150.0,
+    speed_end: 0.0..300.0,
+    color_start: BLUE..BLUE,
+    color_end: RED..RED,
+    size_start: 5.0..8.0,
+    size_end: 0.0..0.0,
+};
 
 pub struct Animacija {
     pub cas: f32,
@@ -36,6 +70,7 @@ impl Animacija {
         }
     }
 
+    #[allow(unused)]
     pub fn naredi_source_params(&self) -> DrawTextureParams {
         let xy = self.izr_frame_xy();
         texture_params_source(
@@ -118,8 +153,13 @@ impl Player {
             premik.x += PLAYER_SPEED * delta;
         }
 
+        if is_key_pressed(KeyCode::P) {
+            particles::spawn(self.position + vec2(8.0, 14.0), None, &COOL_PARTICLES);
+        }
+
         if (self.jumps_allowed > 0 || is_grounded) && is_key_pressed(KeyCode::W) {
             self.velocity_y = -JUMP_VEL;
+            particles::spawn(self.position + vec2(8.0, 28.0), Some(vec2(0.0, 0.5)), &JUMP_PARTICLES);
             if is_grounded == false {
                 self.jumps_allowed -= 1;
             }
@@ -154,6 +194,9 @@ impl Player {
 
         if is_mouse_button_pressed(MouseButton::Left) {
             self.attack_time = 0.0;
+            let smer = dejanska_smer_meca.normalize();
+            let poz = pozicija_meca + vec2(5.0, 5.0) + smer * 10.0;
+            particles::spawn(poz, Some(smer * 0.7), &HIT_PARTICLES);
         } else {
             self.attack_time += delta;
         }
