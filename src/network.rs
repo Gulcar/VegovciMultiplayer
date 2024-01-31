@@ -2,11 +2,12 @@ use std::{net::{TcpStream, TcpListener, SocketAddr}, io::{ErrorKind, Write, BufR
 use macroquad::prelude::*;
 use serde::{Serialize, Deserialize};
 
-use crate::{Player, DinamicenAABBRef, physics, LAYER_PLAYER};
+use crate::{Player, DinamicenAABBRef, physics, LAYER_PLAYER, particles, HIT_PARTICLES};
 use crate::AABB;
 
 const PORT: u16 = 5356;
 const RESPAWN_TIME: f32 = 3.0;
+const FALLOFF_Y: f32 = 500.0;
 
 fn prepare_socket(stream: &mut TcpStream) {
     stream.set_nonblocking(true).unwrap();
@@ -36,7 +37,7 @@ fn handle_bincode_error(e: Box<bincode::ErrorKind>) -> bool {
     return false;
 }
 
-struct ServerConnection {
+pub struct ServerConnection {
     reader: BufReader<TcpStream>,
     state: State,
     addr: SocketAddr,
@@ -117,13 +118,18 @@ impl Server {
         }
     }
 
-    fn handle_attack(&mut self, hit_list: Vec<(u32, AABB)>, exclude_id: u32) {
+    fn handle_attack(&mut self, hit_list: Vec<(u32, AABB)>, exclude_id: u32, pozicija: Vec2, smer: Vec2) {
         //println!("attack_hit {}: {:?}", hit_list.len(), hit_list);
-
-        for (id, _aabb) in &hit_list {
+        for (id, aabb) in &hit_list {
             if *id == exclude_id {
                 continue;
             }
+
+            let particles_pos = aabb.ray_hit(pozicija, smer);
+            if particles_pos.is_none() {
+                continue;
+            }
+            let particles_pos = particles_pos.unwrap();
 
             if *id == 0 {
                 if self.health > 0 {
@@ -133,6 +139,8 @@ impl Server {
                         self.respawn_timer = RESPAWN_TIME;
                         println!("umrl id {}", *id);
                     }
+                    particles::spawn(particles_pos, None, &HIT_PARTICLES);
+                    self.send_msg_all(Message::HitParticles(particles_pos.into()));
                 }
             }
             else if let Some(client) = self.clients.iter_mut().find(|c| c.state.id == *id && c.health > 0) {
@@ -143,8 +151,10 @@ impl Server {
                     println!("umrl id {}", *id);
                 }
                 let msg = Message::Attack(client.health);
-                let send_buf = bincode::serialize(&msg).unwrap();
-                client.reader.get_mut().write(&send_buf).unwrap();
+                Server::send_msg(client, msg);
+
+                particles::spawn(particles_pos, None, &HIT_PARTICLES);
+                self.send_msg_all(Message::HitParticles(particles_pos.into()));
             }
         }
     }
@@ -153,7 +163,9 @@ impl Server {
         let hitbox = Player::calc_sword_hitbox(player.position, player.attack_time, player.razdalja_meca, player.rotation);
         let found = physics::area_query(hitbox, LAYER_PLAYER);
 
-        self.handle_attack(found, 0);
+        let pozicija = player.position + vec2(8.0, 12.0);
+        let smer = Vec2::from_angle(player.rotation);
+        self.handle_attack(found, 0, pozicija, smer);
     }
 
     fn attack(&mut self, conn_i: usize) {
@@ -163,7 +175,9 @@ impl Server {
         let hitbox = Player::calc_sword_hitbox(state.position.into(), state.attack_time, state.razdalja_meca, state.rotation);
         let found = physics::area_query(hitbox, LAYER_PLAYER);
 
-        self.handle_attack(found, state.id);
+        let pozicija = Vec2::from(client.state.position) + vec2(8.0, 12.0);
+        let smer = Vec2::from_angle(client.state.rotation);
+        self.handle_attack(found, state.id, pozicija, smer);
     }
 
     fn handle_msg(&mut self, msg: Message, conn_i: usize) {
@@ -183,8 +197,7 @@ impl Server {
             Message::UserName((_id, name)) => {
                 client.user_name = name.clone();
                 let msg = Message::UserName((client.state.id, name));
-                let send_buf = bincode::serialize(&msg).unwrap();
-                self.send_to_all(&send_buf);
+                self.send_msg_all(msg);
             }
             _ => {},
         }
@@ -223,6 +236,16 @@ impl Server {
         }
     }
 
+    pub fn send_msg_all(&mut self, msg: Message) {
+        let send_buf = bincode::serialize(&msg).unwrap();
+        self.send_to_all(&send_buf);
+    }
+
+    pub fn send_msg(conn: &mut ServerConnection, msg: Message) {
+        let send_buf = bincode::serialize(&msg).unwrap();
+        conn.reader.get_mut().write(&send_buf).unwrap();
+    }
+
     pub fn narisi_cliente(&self, tekstura: &Texture2D) {
         for conn in &self.clients {
             if conn.health <= 0 { continue; }
@@ -247,8 +270,7 @@ impl Server {
                 razdalja_meca: player.razdalja_meca,
             });
         }
-        let send_buf = bincode::serialize(&Message::AllPlayersState(states)).unwrap();
-        self.send_to_all(&send_buf);
+        self.send_msg_all(Message::AllPlayersState(states));
     }
 
     fn get_respawn_location() -> Vec2 {
@@ -273,9 +295,22 @@ impl Server {
                 if client.respawn_timer <= 0.0 {
                     client.health = 100;
                     let msg = Message::Respawn(Server::get_respawn_location().into());
-                    let send_buf = bincode::serialize(&msg).unwrap();
-                    client.reader.get_mut().write(&send_buf).unwrap();
+                    Server::send_msg(client, msg);
                 }
+            }
+        }
+
+        if self.health > 0 && player.position.y > FALLOFF_Y {
+            self.health = 0;
+            self.respawn_timer = RESPAWN_TIME;
+        }
+
+        for client in &mut self.clients {
+            if client.health > 0 && client.state.position.1 > FALLOFF_Y {
+                client.health = 0;
+                client.respawn_timer = RESPAWN_TIME;
+                let msg = Message::Attack(client.health);
+                Server::send_msg(client, msg);
             }
         }
     }
@@ -291,7 +326,10 @@ pub struct Client {
 
 impl Client {
     pub fn new(addr: &str, name: String) -> Client {
-        let mut stream = TcpStream::connect((addr, PORT)).unwrap();
+        let mut stream = match TcpStream::connect((addr, PORT)) {
+            Ok(s) => s,
+            Err(e) => panic!("ERROR povezava neuspešna: {}", e),
+        };
         prepare_socket(&mut stream);
         let msg = Message::UserName((u32::MAX, name));
         stream.write(&bincode::serialize(&msg).unwrap()).unwrap();
@@ -326,6 +364,9 @@ impl Client {
             Message::Respawn((x, y)) => {
                 self.health = 100;
                 player.nastavi_pozicijo(Vec2::new(x, y));
+            }
+            Message::HitParticles((x, y)) => {
+                particles::spawn((x, y).into(), None, &HIT_PARTICLES);
             }
             _ => {},
         }
@@ -386,5 +427,6 @@ pub enum Message {
     AllPlayersState(Vec<State>),
     Attack(i32),
     Respawn((f32, f32)),
+    HitParticles((f32, f32)),
 }
 

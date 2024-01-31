@@ -18,6 +18,12 @@ impl AABB {
         AABB { x: pos.x, y: pos.y, w: size.x, h: size.y }
     }
 
+    #[allow(unused)]
+    pub fn center(&self) -> Vec2 {
+        Vec2::new(self.x + self.w / 2.0,
+                  self.y + self.h / 2.0)
+    }
+
     pub fn overlaps(&self, aabb: AABB) -> bool {
         let a = self;
         let b = &aabb;
@@ -25,6 +31,43 @@ impl AABB {
         let coll_y = (b.y >= a.y && b.y <= a.y + a.h) || (a.y >= b.y && a.y <= b.y + b.h);
         return coll_x && coll_y;
     }
+
+    pub fn inside(&self, point: Vec2) -> bool {
+        return self.x < point.x && self.y < point.y
+            && self.x + self.w > point.x
+            && self.y + self.h > point.y;
+    }
+
+    pub fn ray_hit(&self, ray_pos: Vec2, ray_dir: Vec2) -> Option<Vec2> {
+        if self.inside(ray_pos) {
+            return Some(ray_pos);
+        }
+
+        let t1 = (self.x - ray_pos.x) / ray_dir.x;
+        let t2 = (self.x + self.w - ray_pos.x) / ray_dir.x;
+
+        let t3 = (self.y - ray_pos.y) / ray_dir.y;
+        let t4 = (self.y + self.h - ray_pos.y) / ray_dir.y;
+
+        let xmin = f32::min(t1, t2);
+        let xmax = f32::max(t1, t2);
+
+        let ymin = f32::min(t3, t4);
+        let ymax = f32::max(t3, t4);
+
+        let t = f32::max(xmin, ymin);
+        if t >= 0.0 && t < xmax && t < ymax {
+            return Some(ray_pos + ray_dir * t);
+        }
+        None
+    }
+}
+
+#[allow(unused)]
+pub fn point_closest_on_line(line_start: Vec2, line_dir: Vec2, point: Vec2) -> Vec2 {
+    let point_from_start = point - line_start;
+    let proj = Vec2::dot(point_from_start, line_dir);
+    line_start + line_dir * proj
 }
 
 struct FreeList<T> {

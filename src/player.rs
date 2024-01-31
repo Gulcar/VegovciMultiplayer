@@ -11,13 +11,13 @@ const JUMP_VEL: f32 = 500.0;
 const MAX_VEL: f32 = 600.0;
 const GRAVITY: f32 = 1500.0;
 
-const HIT_PARTICLES: ParticleParams = ParticleParams {
+pub const HIT_PARTICLES: ParticleParams = ParticleParams {
     amount: 10..20,
     lifetime: 0.5,
     speed_start: 100.0..150.0,
     speed_end: 0.0..50.0,
-    color_start: ORANGE..RED,
-    color_end: RED..MAROON,
+    color_start: MAROON..Color::new(0.337, 0.054, 0.027, 1.0),
+    color_end: Color::new(0.286, 0.031, 0.019, 1.0)..Color::new(0.250, 0.011, 0.011, 1.0),
     size_start: 4.0..8.0,
     size_end: 0.0..0.0,
 };
@@ -194,9 +194,6 @@ impl Player {
 
         if is_mouse_button_pressed(MouseButton::Left) {
             self.attack_time = 0.0;
-            let smer = dejanska_smer_meca.normalize();
-            let poz = pozicija_meca + vec2(5.0, 5.0) + smer * 10.0;
-            particles::spawn(poz, Some(smer * 0.7), &HIT_PARTICLES);
         } else {
             self.attack_time += delta;
         }
