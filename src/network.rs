@@ -2,7 +2,7 @@ use std::{net::{TcpStream, TcpListener, SocketAddr}, io::{ErrorKind, Write, BufR
 use macroquad::prelude::*;
 use serde::{Serialize, Deserialize};
 
-use crate::{Player, DinamicenAABBRef, physics, LAYER_PLAYER, particles, HIT_PARTICLES};
+use crate::{Player, DinamicenAABBRef, physics, LAYER_PLAYER, particles, HIT_PARTICLES, SHOW_COLLIDERS};
 use crate::AABB;
 
 const PORT: u16 = 5356;
@@ -395,6 +395,9 @@ impl Client {
 
         for state in &self.net_states {
             if state.id == self.id {
+                if SHOW_COLLIDERS.get() {
+                    draw_rectangle_lines(state.position.0, state.position.1, 16.0, 28.0, 1.0, PURPLE);
+                }
                 continue;
             }
             //draw_rectangle_lines(state.position.0, state.position.1, 16.0, 28.0, 1.0, macroquad::color::RED);
