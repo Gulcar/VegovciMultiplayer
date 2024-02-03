@@ -128,6 +128,8 @@ async fn main() {
             ..Default::default()
         });
 
+        narisi_pop_up_messages(delta);
+
         next_frame().await;
     }
 }

@@ -2,47 +2,14 @@ use std::f32::consts::PI;
 
 use macroquad::prelude::*;
 
-use crate::particles::ParticleParams;
-use crate::{texture_params_source, DinamicenAABBRef, physics, AABB, pozicija_miske_v_svetu, KAMERA_POS, lerp, SHOW_COLLIDERS, particles};
+use crate::{texture_params_source, DinamicenAABBRef, physics, AABB, pozicija_miske_v_svetu, KAMERA_POS, lerp, SHOW_COLLIDERS, particles, pop_up_msg};
 use crate::{LAYER_MAP, LAYER_PLAYER, LAYER_SWORD};
+use crate::particles::{JUMP_PARTICLES, COOL_PARTICLES};
 
 const PLAYER_SPEED: f32 = 75.0;
 const JUMP_VEL: f32 = 500.0;
 const MAX_VEL: f32 = 600.0;
 const GRAVITY: f32 = 1500.0;
-
-pub const HIT_PARTICLES: ParticleParams = ParticleParams {
-    amount: 10..20,
-    lifetime: 0.5,
-    speed_start: 100.0..150.0,
-    speed_end: 0.0..50.0,
-    color_start: MAROON..Color::new(0.337, 0.054, 0.027, 1.0),
-    color_end: Color::new(0.286, 0.031, 0.019, 1.0)..Color::new(0.250, 0.011, 0.011, 1.0),
-    size_start: 4.0..8.0,
-    size_end: 0.0..0.0,
-};
-
-const JUMP_PARTICLES: ParticleParams = ParticleParams {
-    amount: 3..6,
-    lifetime: 0.2,
-    speed_start: 100.0..150.0,
-    speed_end: 0.0..100.0,
-    color_start: WHITE..GRAY,
-    color_end: DARKGRAY..GRAY,
-    size_start: 3.0..5.0,
-    size_end: 0.0..0.0,
-};
-
-const COOL_PARTICLES: ParticleParams = ParticleParams {
-    amount: 100..200,
-    lifetime: 2.0,
-    speed_start: 50.0..150.0,
-    speed_end: 0.0..300.0,
-    color_start: BLUE..BLUE,
-    color_end: RED..RED,
-    size_start: 5.0..8.0,
-    size_end: 0.0..0.0,
-};
 
 pub struct Animacija {
     pub cas: f32,
@@ -155,6 +122,7 @@ impl Player {
 
         if is_key_pressed(KeyCode::P) {
             particles::spawn(self.position + vec2(8.0, 14.0), None, &COOL_PARTICLES);
+            pop_up_msg("kako kul ?!?!?!".to_string());
         }
 
         if (self.jumps_allowed > 0 || is_grounded) && is_key_pressed(KeyCode::W) {

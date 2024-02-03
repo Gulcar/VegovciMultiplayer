@@ -1,8 +1,7 @@
 use std::{net::{TcpStream, TcpListener, SocketAddr}, io::{ErrorKind, Write, BufReader}, collections::HashMap};
 use macroquad::prelude::*;
 use serde::{Serialize, Deserialize};
-
-use crate::{Player, DinamicenAABBRef, physics, LAYER_PLAYER, particles, HIT_PARTICLES, SHOW_COLLIDERS};
+use crate::{Player, DinamicenAABBRef, physics, LAYER_PLAYER, particles, particles::HIT_PARTICLES, SHOW_COLLIDERS, pop_up_msg};
 use crate::AABB;
 
 const PORT: u16 = 5356;
@@ -118,10 +117,20 @@ impl Server {
         }
     }
 
-    fn handle_attack(&mut self, hit_list: Vec<(u32, AABB)>, exclude_id: u32, pozicija: Vec2, smer: Vec2) {
+    fn najdi_ime_za_id(&self, id: u32) -> &str {
+        if id == 0 {
+            return &self.user_name;
+        }
+        if let Some(client) = self.clients.iter().find(|c| c.state.id == id) {
+            return &client.user_name;
+        }
+        return "player";
+    }
+
+    fn handle_attack(&mut self, hit_list: Vec<(u32, AABB)>, napadalec_id: u32, pozicija: Vec2, smer: Vec2) {
         //println!("attack_hit {}: {:?}", hit_list.len(), hit_list);
         for (id, aabb) in &hit_list {
-            if *id == exclude_id {
+            if *id == napadalec_id {
                 continue;
             }
 
@@ -131,13 +140,15 @@ impl Server {
             }
             let particles_pos = particles_pos.unwrap();
 
+            let mut umrl = false;
+
             if *id == 0 {
                 if self.health > 0 {
                     self.health -= 10;
                     if self.health <= 0 {
                         self.health = 0;
                         self.respawn_timer = RESPAWN_TIME;
-                        println!("umrl id {}", *id);
+                        umrl = true;
                     }
                     particles::spawn(particles_pos, None, &HIT_PARTICLES);
                     self.send_msg_all(Message::HitParticles(particles_pos.into()));
@@ -148,13 +159,22 @@ impl Server {
                 if client.health <= 0 {
                     client.health = 0;
                     client.respawn_timer = RESPAWN_TIME;
-                    println!("umrl id {}", *id);
+                    umrl = true;
                 }
                 let msg = Message::Attack(client.health);
                 Server::send_msg(client, msg);
 
                 particles::spawn(particles_pos, None, &HIT_PARTICLES);
                 self.send_msg_all(Message::HitParticles(particles_pos.into()));
+            }
+
+            if umrl {
+                println!("umrl id {}", *id);
+                self.send_msg_all(Message::PlayerDied((*id, napadalec_id)));
+
+                let ime_napadalca = self.najdi_ime_za_id(napadalec_id);
+                let ime_umrlega = self.najdi_ime_za_id(*id);
+                pop_up_msg(format!("{} killed {}", ime_napadalca, ime_umrlega));
             }
         }
     }
@@ -368,6 +388,11 @@ impl Client {
             Message::HitParticles((x, y)) => {
                 particles::spawn((x, y).into(), None, &HIT_PARTICLES);
             }
+            Message::PlayerDied((id, napadalec_id)) => {
+                let ime_napadalca = self.net_user_names.get(&napadalec_id).map(|s| s.as_str()).unwrap_or("player");
+                let ime_umrlega = self.net_user_names.get(&id).map(|s| s.as_str()).unwrap_or("player");
+                pop_up_msg(format!("{} killed {}", ime_napadalca, ime_umrlega));
+            }
             _ => {},
         }
     }
@@ -431,5 +456,6 @@ pub enum Message {
     Attack(i32),
     Respawn((f32, f32)),
     HitParticles((f32, f32)),
+    PlayerDied((u32, u32)),
 }
 

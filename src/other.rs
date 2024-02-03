@@ -1,5 +1,6 @@
 use macroquad::prelude::*;
 use std::cell::Cell;
+use std::collections::VecDeque;
 use crate::{physics, AABB, StaticenAABBRef};
 use crate::{LAYER_MAP, LAYER_PLAYER, LAYER_SWORD};
 
@@ -102,4 +103,58 @@ pub fn generate_map_colliders(map_image: Image, offset: Vec2) -> Vec<StaticenAAB
     }
 
     colliders
+}
+
+static mut MESSAGES: VecDeque<PopUpMessage> = VecDeque::new();
+
+struct PopUpMessage {
+    time: f32,
+    total_time: f32,
+    msg: String,
+}
+
+pub fn pop_up_msg(msg: String) {
+    pop_up_msg_time(msg, 5.0);
+}
+
+pub fn pop_up_msg_time(msg: String, time: f32) {
+    let messages = unsafe { &mut MESSAGES };
+    messages.push_front(PopUpMessage { time, total_time: time, msg });
+}
+
+pub fn narisi_pop_up_messages(delta: f32) {
+    let messages = unsafe { &mut MESSAGES };
+
+    let mut y = screen_units_height() - 5.0;
+
+    let mut i: i32 = 0;
+    while (i as usize) < messages.len() {
+        let msg = &mut messages[i as usize];
+
+        let mut alpha = 1.0;
+        if msg.total_time - msg.time < 0.1 {
+            alpha = (msg.total_time - msg.time) * 10.0;
+        }
+        else if msg.time < 0.1 {
+            alpha = msg.time * 10.0;
+        }
+
+        let pos = vec2(-screen_units_width() + 3.0, y) + KAMERA_POS.get();
+        draw_text_ex(&msg.msg, pos.x, pos.y, TextParams {
+            font_size: 32,
+            font_scale: 0.35,
+            color: Color::new(1.0, 1.0, 1.0, alpha),
+            ..Default::default()
+        });
+
+        y -= 11.0;
+
+        msg.time -= delta;
+        if msg.time < 0.0 {
+            messages.remove(i as usize);
+            i -= 1;
+        }
+
+        i += 1;
+    }
 }
