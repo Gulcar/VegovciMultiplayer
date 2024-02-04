@@ -158,3 +158,30 @@ pub fn narisi_pop_up_messages(delta: f32) {
         i += 1;
     }
 }
+
+pub fn narisi_tekst_sredinsko(tekst: &str, pos: Vec2, scale: f32) {
+    let sirina = measure_text(tekst, None, 32, scale).width;
+    draw_text_ex(tekst, pos.x - sirina / 2.0, pos.y, TextParams {
+        font_size: 32,
+        font_scale: scale,
+        ..Default::default()
+    });
+}
+
+pub fn narisi_leaderboard(data: &Vec<(String, i32)>) {
+    let scr_w = screen_units_width();
+    let scr_h = screen_units_height();
+    let kamera = KAMERA_POS.get();
+
+    draw_rectangle(-scr_w + kamera.x, -scr_h + kamera.y, 2.0 * scr_w, 2.0 * scr_h, Color::new(0.0, 0.0, 0.0, 0.5));
+
+    let mut pos = vec2(0.0, -scr_h + 80.0) + KAMERA_POS.get();
+    narisi_tekst_sredinsko("LEADERBOARD", pos, 0.75);
+    pos.y += 15.0;
+
+    for i in 0..data.len() {
+        narisi_tekst_sredinsko(&format!("{}. {}: {}", (i+1), data[i].0, data[i].1), pos, 0.4);
+        pos.y += 10.0;
+    }
+}
+

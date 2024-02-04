@@ -65,6 +65,8 @@ async fn main() {
     println!("stevilo staticnih objektov: {}", physics::st_staticnih_obj());
     println!("stevilo dinamicnih objektov: {}", physics::st_dinamicnih_obj());
 
+    let mut leaderboard_data = Vec::new();
+
     loop {
         let delta = get_frame_time().min(1.0 / 15.0);
 
@@ -129,6 +131,24 @@ async fn main() {
         });
 
         narisi_pop_up_messages(delta);
+
+        if is_key_down(KeyCode::Tab) {
+            match net_interface {
+                NetInterface::Server(ref mut server) => {
+                    if server.nov_leaderboard {
+                        server.nov_leaderboard = false;
+                        leaderboard_data = server.get_leaderboard_data();
+                    }
+                },
+                NetInterface::Client(ref mut client) => {
+                    if client.nov_leaderboard {
+                        client.nov_leaderboard = false;
+                        leaderboard_data = client.get_leaderboard_data();
+                    }
+                }
+            }
+            narisi_leaderboard(&leaderboard_data);
+        }
 
         next_frame().await;
     }

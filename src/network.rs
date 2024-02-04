@@ -1,4 +1,4 @@
-use std::{net::{TcpStream, TcpListener, SocketAddr}, io::{ErrorKind, Write, BufReader}, collections::HashMap};
+use std::{collections::HashMap, io::{ErrorKind, Write, BufReader}, net::{TcpStream, TcpListener, SocketAddr}};
 use macroquad::prelude::*;
 use serde::{Serialize, Deserialize};
 use crate::{Player, DinamicenAABBRef, physics, LAYER_PLAYER, particles, particles::HIT_PARTICLES, SHOW_COLLIDERS, pop_up_msg};
@@ -44,6 +44,7 @@ pub struct ServerConnection {
     aabb_ref: DinamicenAABBRef,
     health: i32,
     respawn_timer: f32,
+    kills: i32,
 }
 
 pub struct Server {
@@ -53,6 +54,8 @@ pub struct Server {
     user_name: String,
     pub health: i32,
     respawn_timer: f32,
+    kills: i32,
+    pub nov_leaderboard: bool,
 }
 
 impl Server {
@@ -66,6 +69,8 @@ impl Server {
             user_name,
             health: 100,
             respawn_timer: 0.0,
+            kills: 0,
+            nov_leaderboard: true,
         }
     }
 
@@ -75,11 +80,11 @@ impl Server {
         let mut send_buf: Vec<u8> = Vec::new();
         send_buf.append(&mut bincode::serialize(&Message::DodeljenId(self.naslednji_id)).unwrap());
 
-        let msg = Message::UserName((0, self.user_name.clone()));
+        let msg = Message::UserInfo((0, self.user_name.clone(), self.kills));
         send_buf.append(&mut bincode::serialize(&msg).unwrap());
 
         for client in &self.clients {
-            let msg = Message::UserName((client.state.id, client.user_name.clone()));
+            let msg = Message::UserInfo((client.state.id, client.user_name.clone(), client.kills));
             send_buf.append(&mut bincode::serialize(&msg).unwrap());
         }
 
@@ -104,8 +109,10 @@ impl Server {
                         aabb_ref: physics::dodaj_dinamicen_obj(AABB::new(0.0, 0.0, 16.0, 28.0), LAYER_PLAYER, 0, self.naslednji_id),
                         health: 100,
                         respawn_timer: 0.0,
+                        kills: 0,
                     });
                     self.naslednji_id += 1;
+                    self.nov_leaderboard = true;
                 },
                 Err(e) => {
                     if e.kind() == ErrorKind::WouldBlock {
@@ -175,6 +182,14 @@ impl Server {
                 let ime_napadalca = self.najdi_ime_za_id(napadalec_id);
                 let ime_umrlega = self.najdi_ime_za_id(*id);
                 pop_up_msg(format!("{} killed {}", ime_napadalca, ime_umrlega));
+
+                if napadalec_id == 0 {
+                    self.kills += 1;
+                }
+                else if let Some(client) = self.clients.iter_mut().find(|c| c.state.id == napadalec_id) {
+                    client.kills += 1;
+                }
+                self.nov_leaderboard = true;
             }
         }
     }
@@ -214,9 +229,10 @@ impl Server {
                     self.attack(conn_i);
                 }
             },
-            Message::UserName((_id, name)) => {
+            Message::UserInfo((_id, name, _kills)) => {
+                pop_up_msg(format!("{} joined", name));
                 client.user_name = name.clone();
-                let msg = Message::UserName((client.state.id, name));
+                let msg = Message::UserInfo((client.state.id, name, client.kills));
                 self.send_msg_all(msg);
             }
             _ => {},
@@ -236,6 +252,11 @@ impl Server {
                     Err(e) => {
                         if handle_bincode_error(e) {
                             println!("client disconnected {:?}", self.clients[i as usize].addr);
+
+                            self.send_msg_all(Message::PlayerDisconnected(self.clients[i as usize].state.id));
+                            pop_up_msg(format!("{} left", self.clients[i as usize].user_name));
+                            self.nov_leaderboard = true;
+
                             self.clients.swap_remove(i as usize);
                             i -= 1;
                         }
@@ -315,6 +336,7 @@ impl Server {
                 if client.respawn_timer <= 0.0 {
                     client.health = 100;
                     let msg = Message::Respawn(Server::get_respawn_location().into());
+                    client.state.position.1 = -1000.0; // da ne dobim 2x smrti
                     Server::send_msg(client, msg);
                 }
             }
@@ -323,25 +345,54 @@ impl Server {
         if self.health > 0 && player.position.y > FALLOFF_Y {
             self.health = 0;
             self.respawn_timer = RESPAWN_TIME;
+
+            self.send_msg_all(Message::PlayerDied((0, u32::MAX)));
+            pop_up_msg(format!("{} killed himself", self.user_name));
         }
+
+        let mut died_msgs_buf = Vec::new();
 
         for client in &mut self.clients {
             if client.health > 0 && client.state.position.1 > FALLOFF_Y {
                 client.health = 0;
                 client.respawn_timer = RESPAWN_TIME;
-                let msg = Message::Attack(client.health);
-                Server::send_msg(client, msg);
+                Server::send_msg(client, Message::Attack(client.health));
+
+                died_msgs_buf.append(&mut bincode::serialize(&Message::PlayerDied((client.state.id, u32::MAX))).unwrap());
+                pop_up_msg(format!("{} killed himself", client.user_name));
             }
         }
+
+        if died_msgs_buf.len() > 0 {
+            self.send_to_all(&died_msgs_buf);
+        }
     }
+
+    pub fn get_leaderboard_data(&self) -> Vec<(String, i32)> {
+        let mut vec = Vec::new();
+        vec.push((self.user_name.clone(), self.kills));
+
+        for client in &self.clients {
+            vec.push((client.user_name.clone(), client.kills));
+        }
+
+        vec.sort_by(|a, b| b.1.cmp(&a.1));
+        vec
+    }
+}
+
+struct UserInfo {
+    name: String,
+    kills: i32,
 }
 
 pub struct Client {
     pub id: u32,
     reader: BufReader<TcpStream>,
     net_states: Vec<State>,
-    net_user_names: HashMap<u32, String>,
+    net_users: HashMap<u32, UserInfo>,
     pub health: i32,
+    pub nov_leaderboard: bool,
 }
 
 impl Client {
@@ -351,14 +402,15 @@ impl Client {
             Err(e) => panic!("ERROR povezava neuspešna: {}", e),
         };
         prepare_socket(&mut stream);
-        let msg = Message::UserName((u32::MAX, name));
+        let msg = Message::UserInfo((u32::MAX, name, 0));
         stream.write(&bincode::serialize(&msg).unwrap()).unwrap();
         Client {
             id: u32::MAX,
             reader: BufReader::new(stream),
             net_states: Vec::new(),
-            net_user_names: HashMap::new(),
+            net_users: HashMap::new(),
             health: 100,
+            nov_leaderboard: true,
         }
     }
 
@@ -375,8 +427,10 @@ impl Client {
             Message::AllPlayersState(states) => {
                 self.net_states = states;
             },
-            Message::UserName((id, name)) => {
-                self.net_user_names.insert(id, name);
+            Message::UserInfo((id, name, kills)) => {
+                pop_up_msg(format!("{} joined", name));
+                self.net_users.insert(id, UserInfo { name, kills });
+                self.nov_leaderboard = true;
             }
             Message::Attack(new_health) => {
                 self.health = new_health;
@@ -389,9 +443,25 @@ impl Client {
                 particles::spawn((x, y).into(), None, &HIT_PARTICLES);
             }
             Message::PlayerDied((id, napadalec_id)) => {
-                let ime_napadalca = self.net_user_names.get(&napadalec_id).map(|s| s.as_str()).unwrap_or("player");
-                let ime_umrlega = self.net_user_names.get(&id).map(|s| s.as_str()).unwrap_or("player");
-                pop_up_msg(format!("{} killed {}", ime_napadalca, ime_umrlega));
+                if napadalec_id != u32::MAX {
+                    let ime_napadalca = self.net_users.get(&napadalec_id).map(|s| s.name.as_str()).unwrap_or("player");
+                    let ime_umrlega = self.net_users.get(&id).map(|s| s.name.as_str()).unwrap_or("player");
+                    pop_up_msg(format!("{} killed {}", ime_napadalca, ime_umrlega));
+
+                    if let Some(u) = self.net_users.get_mut(&napadalec_id) {
+                        u.kills += 1;
+                        self.nov_leaderboard = true;
+                    }
+                } else {
+                    let ime_umrlega = self.net_users.get(&id).map(|s| s.name.as_str()).unwrap_or("player");
+                    pop_up_msg(format!("{} killed himself", ime_umrlega));
+                }
+            }
+            Message::PlayerDisconnected(id) => {
+                let ime = self.net_users.get(&id).map(|s| s.name.as_str()).unwrap_or("player");
+                pop_up_msg(format!("{} left", ime));
+                self.net_users.remove(&id);
+                self.nov_leaderboard = true;
             }
             _ => {},
         }
@@ -416,8 +486,6 @@ impl Client {
     }
 
     pub fn narisi_cliente(&self, tekstura: &Texture2D) {
-        let default_name = "peer".to_string();
-
         for state in &self.net_states {
             if state.id == self.id {
                 if SHOW_COLLIDERS.get() {
@@ -426,9 +494,20 @@ impl Client {
                 continue;
             }
             //draw_rectangle_lines(state.position.0, state.position.1, 16.0, 28.0, 1.0, macroquad::color::RED);
-            let name = self.net_user_names.get(&state.id).unwrap_or(&default_name);
+            let name = self.net_users.get(&state.id).map(|u| u.name.as_str()).unwrap_or("player");
             Player::narisi_iz(tekstura, state.position.into(), state.anim_frame.into(), state.rotation, state.razdalja_meca, state.attack_time, name, -1);
         }
+    }
+
+    pub fn get_leaderboard_data(&self) -> Vec<(String, i32)> {
+        let mut vec = Vec::new();
+
+        for (_id, info) in &self.net_users {
+            vec.push((info.name.clone(), info.kills));
+        }
+
+        vec.sort_by(|a, b| b.1.cmp(&a.1));
+        vec
     }
 }
 
@@ -450,12 +529,13 @@ pub struct State {
 #[derive(Serialize, Deserialize, Debug)]
 pub enum Message {
     DodeljenId(u32),
-    UserName((u32, String)),
+    UserInfo((u32, String, i32)),
     PlayerState(State),
     AllPlayersState(Vec<State>),
     Attack(i32),
     Respawn((f32, f32)),
     HitParticles((f32, f32)),
     PlayerDied((u32, u32)),
+    PlayerDisconnected(u32),
 }
 
